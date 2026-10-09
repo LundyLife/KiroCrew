@@ -45,6 +45,7 @@ from kiro_crew.apps.registry import (
 from kiro_crew.apps.routes_art import _SAFE_REPO_RE, _is_safe_repo_identifier
 from kiro_crew.apps.routes_lifecycle import (
     _app_may_run_after_install,
+    _attach_backend_notice,
     _register_app_off_loop,
     _start_backend_after_install,
     _suspend_app_for_session_approval_reconsent,
@@ -238,7 +239,7 @@ async def handle_registry_install(request: web.Request) -> web.Response:
     sel().log_api_access(
         caller="dashboard", operation="app_registry_install", outcome="completed", resources=name
     )
-    return web.json_response(result, status=201)
+    return web.json_response(_attach_backend_notice(result, result["name"]), status=201)
 
 
 async def handle_registry_install_stream(request: web.Request) -> web.StreamResponse:

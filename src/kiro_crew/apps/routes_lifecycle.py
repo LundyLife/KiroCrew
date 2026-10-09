@@ -14,13 +14,22 @@ as ``kiro_crew.apps.routes.<name>``, and a patch there reaches this module too
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
 from aiohttp import web
 
 from kiro_crew.apps.backend import (
+    PidfileRevokeFailed,
+    _unrevoke_app_pid,
+    app_backend_lifecycle_flock,
+    backend_notice,
+    capture_backend_provenance,
+    quarantine_backend,
+    record_backend_notice,
     recorded_backend_port,
+    revoke_backend_provenance,
     start_app_backend,
     stop_app_backend,
     unstopped_backend_port,
@@ -54,6 +63,29 @@ def _redact_warning(msg: str) -> str:
 
     msg = redact(msg)
     return msg
+
+
+def _attach_backend_notice(payload: dict[str, Any], name: str) -> dict[str, Any]:
+    """Add *name*'s ``backend_notice`` to *payload* when its backend needs the user.
+
+    The notice says why an enabled app's backend is not running when only the user
+    can fix it (a port held by a process this gateway cannot attribute, an update
+    that skipped its restart). A separate key from ``notice``, which update and
+    uninstall already use for a machine-read token. The app detail page renders it.
+    """
+    notice = backend_notice(name)
+    if notice:
+        payload["backend_notice"] = notice
+    return payload
+
+
+# The update skipped its restart because the old spawn record's removal was not
+# confirmed: starting now could adopt the old version still holding the port.
+_UPDATE_NOT_RESTARTED_NOTICE = (
+    "Update installed, but the background service for {name} was not restarted "
+    "because the previous version may still be running and holding its port. "
+    "Close that program, then turn the app off and on again."
+)
 
 
 def _unregister_notification_channels(request: web.Request, name: str) -> None:
@@ -160,14 +192,144 @@ async def _stop_backend_and_observe(name: str) -> tuple[int | None, bool]:
     """
     loop = asyncio.get_running_loop()
     port_hint = await loop.run_in_executor(subprocess_executor(), recorded_backend_port, name)
-    await loop.run_in_executor(subprocess_executor(), stop_app_backend, name)
+    # The spawn-provenance row has ALREADY been dropped by the uninstall at its
+    # durable commit boundary (after the files are removed, on result.ok), so this
+    # stop takes the PLAIN path and does not touch provenance again. Doing the
+    # delete here instead would make it non-terminal -- onUninstall has already run
+    # by now, so a failed delete could not abort -- which is exactly the hazard the
+    # commit-boundary deletion exists to remove.
+    await loop.run_in_executor(subprocess_executor(), lambda: stop_app_backend(name))
     live_port = await loop.run_in_executor(
         subprocess_executor(), lambda: unstopped_backend_port(name, port_hint=port_hint)
     )
     return live_port, port_hint is not None
 
 
-async def _app_may_run_after_install(name: str, *, fresh_install: bool = False) -> bool:
+@contextlib.asynccontextmanager
+async def _hold_backend_lifecycle_flock(name: str):
+    """Hold the cross-process backend lifecycle flock across an update's await points.
+
+    GPT 6.1: an update stops the backend, revokes the pre-update row, replaces the
+    files and revokes again — but a backend spawn racing those steps holds
+    ``app_backend_lifecycle_flock`` while it publishes ``ap`` and then calls
+    ``_record_app_pid``, which writes the row UNCONDITIONALLY and so overwrites the
+    revoked tombstone. If the update takes no lifecycle lock, a delayed
+    ``_record_app_pid`` can land between the stop and the revoke (or between the two
+    revocations), restoring a non-revoked row that the restart then adopts as the new
+    version while an old-code survivor still serves. Holding this flock across the
+    whole stop → replacement → final revocation makes the update and the spawn
+    mutually exclusive: the update waits for an in-flight spawn to finish recording,
+    then revokes atomically; a spawn that starts later blocks until the update
+    releases. Symmetric with ``uninstall_app``, which holds the same flock across its
+    revoke + removal.
+
+    The sync flock blocks on ``flock()``, so it is entered and exited OFF the event
+    loop (both ``uninstall_app`` callers run off-loop too); the fd is held for the
+    duration. Released BEFORE the restart — the restart's own spawn re-acquires it to
+    record the new generation's identity, so holding it across the restart would
+    self-deadlock against that spawn.
+    """
+    loop = asyncio.get_running_loop()
+    cm = app_backend_lifecycle_flock(name)
+    await loop.run_in_executor(subprocess_executor(), cm.__enter__)
+    try:
+        yield
+    finally:
+        await loop.run_in_executor(subprocess_executor(), cm.__exit__, None, None, None)
+
+
+async def _revoke_provenance_before_replacement(name: str) -> bool:
+    """DURABLY revoke the pre-update spawn row BEFORE the update replaces files.
+
+    An update reuses the port, so the pre-update row keeps vouching for whatever
+    rebinds it — including a child that survived the stop above and forked a
+    replacement — until it is invalidated. Doing that invalidation only AFTER the
+    files are replaced leaves a window: the new code is on disk, the old row still
+    vouches, and if the post-replacement revoke then cannot persist (ENOSPC/EDQUOT),
+    a restart or same-name adoption attributes the OLD-code survivor as the updated
+    app. So the durable revoke happens HERE, before replacement, and the caller
+    REFUSES the replacement when it cannot be confirmed — nothing has been destroyed,
+    the operator frees the disk and retries. The stop above may have RESTORED the row
+    (an ordinary stop that found a detached survivor keeps the recovery row), so there
+    is a live row to revoke even though the stop forgot it first.
+
+    Returns ``True`` when the row is durably revoked (or there was none) and the
+    update may proceed; ``False`` when the revoke could not be confirmed and the
+    caller must refuse the replacement.
+    """
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            subprocess_executor(), revoke_backend_provenance, name
+        )
+        return True
+    except PidfileRevokeFailed as exc:
+        logger.warning(
+            "update of %r: could not durably revoke the pre-update spawn record (%s); "
+            "refusing to replace files so a same-name adoption cannot attribute an "
+            "old-code survivor as the updated app",
+            name,
+            exc,
+        )
+        return False
+
+
+async def _invalidate_provenance_before_restart(name: str) -> bool:
+    """Durably revoke the pre-update spawn record and report whether that is confirmed.
+
+    An update replaces the code behind the name while reusing the port, so the
+    pre-update row still vouches for whatever rebinds it and a restart would adopt a
+    survivor running the OLD code as the new version. Called once the update has
+    committed (the rollback path has already returned), this invalidates the stale
+    row so the new spawn records its own.
+
+    Returns ``True`` when the record is CONFIRMED invalid on disk and the caller may
+    restart. Returns ``False`` when invalidation could not be made durable
+    (ENOSPC/EDQUOT) — the caller must then NOT restart, or it would adopt the
+    stale-row survivor; the files are updated regardless and the operator restarts
+    once the disk is writable.
+    """
+    loop = asyncio.get_running_loop()
+    # DURABLE revoke first: stamp the row ``revoked`` and confirm the stamp reached
+    # disk BEFORE the restart. The restart's adopt path refuses a revoked row, and —
+    # unlike the in-memory quarantine, which a restart loses — the stamp rides on the
+    # row the startup stale-reap retains, so it still refuses an old-code survivor
+    # after a crash or restart. When the stamp cannot be confirmed we refuse the
+    # restart rather than start onto a row that would re-attribute the survivor.
+    try:
+        await loop.run_in_executor(subprocess_executor(), revoke_backend_provenance, name)
+    except PidfileRevokeFailed as exc:
+        # Belt-and-braces: also hold the in-memory quarantine for THIS generation,
+        # which needs no disk write and so holds under the very disk-full that
+        # defeated the durable stamp. The operator frees the disk and retries.
+        await loop.run_in_executor(
+            subprocess_executor(),
+            quarantine_backend,
+            name,
+            f"update could not durably revoke the spawn record: {exc}",
+        )
+        logger.warning(
+            "update of %r: could not durably revoke the spawn record (%s); not "
+            "starting the backend so a restart does not adopt an old-code survivor "
+            "as the new version",
+            name,
+            exc,
+        )
+        return False
+    # The row is durably revoked; KEEP the revoked tombstone rather than deleting it.
+    #
+    # GPT 6.1: deleting here reopens the same resurrection race the uninstall path
+    # closes by retaining its tombstone. A ceiling-driven stop can overlap this update
+    # while a detached child still serves; if the delete makes the name ABSENT, the
+    # delayed stop's _restore_app_pid / _restore_for_retry (guarded only by
+    # name-absence) restores its cached PRE-update, non-revoked row — and a later
+    # enable then attributes and adopts the pre-update old-code child as the updated
+    # backend. The revoked tombstone makes both guards hold: _restore_app_pid refuses
+    # (the name is present) and _adoption_provenance refuses (the row is revoked). The
+    # new spawn's _record_app_pid overwrites the tombstone with its own un-revoked
+    # identity (the new generation), and the startup stale-reap drops a tombstone whose
+    # leader is dead and whose group has no survivor — so the fence neither leaks
+    # adoption nor accumulates. Symmetric with uninstall_app's commit boundary.
+    return True
     """Read whether installed app resources may run after an install or update."""
 
     def _read_live_state() -> bool:
@@ -177,6 +339,38 @@ async def _app_may_run_after_install(name: str, *, fresh_install: bool = False) 
         return fresh_install or bool(info.get("enabled"))
 
     return await asyncio.get_running_loop().run_in_executor(subprocess_executor(), _read_live_state)
+
+
+async def _restore_provenance_after_failed_update(
+    name: str, preserved_row: dict[str, Any] | None
+) -> None:
+    """Put back the spawn record a failed update captured, while the caller holds the flock.
+
+    Called inside ``_hold_backend_lifecycle_flock``, never after it: once the flock is
+    released a CLI uninstall queued on it runs at once, revokes this same spawn's row and
+    removes the app, and a restore landing after that would clear the uninstall's
+    revocation -- a same-name reinstall could then adopt the removed app's survivor.
+    Under the flock the restore and the uninstall are ordered, and the uninstall's
+    revocation is the last word. ``_restore_app_after_failed_update`` runs after release
+    and does not touch the row again.
+
+    *preserved_row* is the spawn record captured BEFORE the update's stop. The stop
+    forgets a tracked backend's row, so without this the rollback restart's adopt
+    branch would re-capture a surviving detached child, find no record attributing
+    it, and refuse it -- leaving the enabled app unreachable. Restored BEFORE the
+    restart via _unrevoke_app_pid: the pre-replacement F2 revoke may have stamped the
+    live row ``revoked``, and plain _restore_app_pid (setdefault) would see the name
+    present and leave that stamp standing, so the still-installed app's own backend
+    would be refused; _unrevoke_app_pid clears the stamp when the live row is this
+    spawn's revoked incarnation while leaving a successor a fresh spawn recorded. It
+    runs whether or not the app may run: a DISABLED app whose update failed is not
+    restarted, but a detached survivor can still be holding its port, and the recovery
+    row is the only handle a later re-enable has to re-attribute it.
+    """
+    if preserved_row is not None:
+        await asyncio.get_running_loop().run_in_executor(
+            subprocess_executor(), _unrevoke_app_pid, name, preserved_row
+        )
 
 
 async def _restore_app_after_failed_update(name: str) -> None:
