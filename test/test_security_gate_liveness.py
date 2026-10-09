@@ -532,7 +532,14 @@ def _url_payload_command(n: int) -> str:
 #: substitution may expand to nothing in the program word, and
 #: ``#`` / ``<<`` inside an unpaired ``${…}`` / ``$[…]`` open no comment or heredoc.
 #: Each command is read with and without that tracking. Deny-only: no allow widened.
-_PACKAGE_LINE_BUDGET = 32_635
+#:
+#: Raised by 41, from 32,635, for the ``self-protection-ssh-agent`` floor: the
+#: ``kirocrew ssh-agent approve`` step-up verb joins the sibling self-protection
+#: floors (``_is_self_ssh_agent`` in ``argv_floor_self``, its verb set in
+#: ``vocabulary``, its id in the floor loop, exports and rule tables) plus the
+#: ``ssh-auth-sock-consent-pending`` keystone leaf in ``paths_lists``. One floor of
+#: an existing shape; no matcher widened, no threshold moved.
+_PACKAGE_LINE_BUDGET = 32_676
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
