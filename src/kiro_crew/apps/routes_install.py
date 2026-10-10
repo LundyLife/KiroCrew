@@ -20,6 +20,7 @@ from typing import Any
 from aiohttp import web
 
 from kiro_crew.apps.backend import (
+    backend_notice,
     capture_backend_provenance,
     record_backend_notice,
     start_app_backend,
@@ -41,6 +42,7 @@ from kiro_crew.apps.registry import (
 )
 from kiro_crew.apps.routes_lifecycle import (
     _UPDATE_NOT_RESTARTED_NOTICE,
+    _UPDATE_PROVENANCE_WRITE_FAILED_NOTICE,
     _app_may_run_after_install,
     _attach_backend_notice,
     _check_min_version,
@@ -49,6 +51,7 @@ from kiro_crew.apps.routes_lifecycle import (
     _invalidate_provenance_before_restart,
     _refuse_while_startup_hook_runs,
     _register_app_off_loop,
+    _replace_installed_app_with_provenance,
     _restore_app_after_failed_update,
     _restore_provenance_after_failed_update,
     _revoke_provenance_before_replacement,
@@ -111,67 +114,18 @@ async def handle_update_app(request: web.Request) -> web.Response:
                 return startup_refusal
 
             # Stop the backend, then deregister old resources -- same order as
-            # uninstall and the disable rollback. Stopping pops the tracking record,
-            # so the health watch cannot re-register the OLD manifest's MCP servers
-            # after the scrub (see app-kit-platform §17).
-            # Capture the spawn row BEFORE the stop forgets it, so a failed update
-            # can restore it and the rollback restart can re-attribute a survivor.
-            #
-            # GPT 6.1: the stop → revoke → replace → final-revoke span runs holding
-            # ``_hold_backend_lifecycle_flock`` so a racing spawn cannot overwrite the
-            # revoked tombstone via ``_record_app_pid``. The flock is RELEASED before
-            # any restart (rollback or success) — those re-acquire it in
-            # ``start_app_backend`` and holding it across them would self-deadlock.
-            reg_install: dict[str, Any] | None = None
-            reg_provenance_dropped = False
-            reg_outcome_kind: str  # "revoke_failed" | "install_failed" | "committed"
-            async with _hold_backend_lifecycle_flock(name):
-                reg_preserved_row = await asyncio.get_running_loop().run_in_executor(
-                    subprocess_executor(), capture_backend_provenance, name
-                )
-                await asyncio.get_running_loop().run_in_executor(
-                    subprocess_executor(), stop_app_backend, name
-                )
-                await _deregister_app_off_loop(name)
+            # uninstall and the disable rollback. The provenance transaction (capture →
+            # stop → deregister → revoke-before → replace → invalidate/restore) runs in
+            # the shared helper under the lifecycle flock, so a racing spawn cannot
+            # overwrite the revoked tombstone; the restart below runs after the flock.
+            reg_replace = await _replace_installed_app_with_provenance(
+                name, lambda: install_from_registry(registry_name)
+            )
+            reg_install = reg_replace.result
+            reg_provenance_dropped = reg_replace.provenance_dropped
+            reg_outcome_kind = reg_replace.kind
 
-                # F2 fence: durably revoke the pre-update row BEFORE the registry
-                # install replaces files. If it cannot be confirmed, REFUSE the
-                # replacement (the app is untouched, so the rollback restores it)
-                # rather than commit new code over a row that would still vouch for
-                # an old-code survivor.
-                if not await _revoke_provenance_before_replacement(name):
-                    reg_outcome_kind = "revoke_failed"
-                    await _restore_provenance_after_failed_update(name, reg_preserved_row)
-                else:
-                    reg_install = await install_from_registry(registry_name)
-                    if not reg_install.get("ok"):
-                        if reg_install.get("committed"):
-                            # The install already landed on disk, but a post-commit
-                            # step failed (set_app_provenance could not persist the
-                            # new row). This is NOT a rollback: the new code is in
-                            # place, so the pre-update row must stay revoked. Restoring
-                            # it would let the recovery adopt an old-code survivor as
-                            # the updated backend — exactly the misattribution this
-                            # change closes. Leave it revoked and fail closed: do not
-                            # restart (nothing may be adopted against the stale row).
-                            reg_outcome_kind = "committed_provenance_failed"
-                        else:
-                            # A confirmed rollback: the install did not land, so the
-                            # pre-update row still legitimately vouches for the app's
-                            # own backend and is restored.
-                            reg_outcome_kind = "install_failed"
-                            await _restore_provenance_after_failed_update(name, reg_preserved_row)
-                    else:
-                        # The update committed. Drop the pre-update spawn record
-                        # BEFORE any restart (see _invalidate_provenance_before_restart):
-                        # a retained row would let the restart adopt an old-code
-                        # survivor as the new version. An unconfirmed drop means do NOT
-                        # restart — but the app is UPDATED and must still be
-                        # re-registered so it is not left with zero resources.
-                        reg_provenance_dropped = await _invalidate_provenance_before_restart(name)
-                        reg_outcome_kind = "committed"
-
-            # Flock released. Register / restart now re-acquire it as needed; the row was
+            # Register / restart now re-acquire the flock as needed; the row was
             # already restored under the flock on a failed outcome.
             if reg_outcome_kind == "revoke_failed":
                 await _restore_app_after_failed_update(name)
@@ -201,6 +155,51 @@ async def handle_update_app(request: web.Request) -> web.Response:
                     error=reg_install.get("error", ""),
                 )
                 return web.json_response(reg_install, status=400)
+            if reg_outcome_kind == "committed_provenance_failed":
+                # The registry install LANDED on disk but a post-commit step could not
+                # persist the new spawn row (install_from_registry -> ok=False,
+                # committed=True). This is NOT a rollback: the new code is in place, so
+                # the pre-update row stays revoked and is NOT restored (restoring it
+                # would let a recovery adopt an old-code survivor as the updated
+                # backend), and the backend is NOT restarted (nothing may be adopted
+                # against the stale row). It is also NOT a success: the files are
+                # re-registered so the updated app keeps its resources (persist-before-
+                # you-publish), but the failure is AUDITED as such, surfaced to the UI
+                # as a coded 500 (the server could not finish the update), and recorded
+                # as a notice that names the actual cause -- the provenance write, not a
+                # port-holder -- so the app detail page tells the user what to fix.
+                assert reg_install is not None
+                if await _app_may_run_after_install(name):
+                    reg_result = await _register_app_off_loop(name)
+                    reg_install["registration"] = reg_result.to_dict()
+                record_backend_notice(
+                    name, _UPDATE_PROVENANCE_WRITE_FAILED_NOTICE.format(name=name)
+                )
+                err = reg_install.get("error") or (
+                    "the updated backend's spawn record could not be persisted"
+                )
+                sel().log_api_access(
+                    caller="dashboard",
+                    operation="app_update",
+                    outcome="failed",
+                    resources=name,
+                    error=err,
+                )
+                # A transparent, coded body (not the install dict, no spread): the
+                # dashboard reads ``code`` to localize the message, so the error carries
+                # one rather than prose alone. The backend notice and the install
+                # result's registration ride along for the UI (``None`` when absent).
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": err,
+                        "code": "provenance_not_recorded",
+                        "name": name,
+                        "registration": reg_install.get("registration"),
+                        "backend_notice": backend_notice(name),
+                    },
+                    status=500,
+                )
             assert reg_install is not None
             # Live read, not the pre-update ``info`` snapshot: ``update_app`` drops
             # ``enabled`` when the new version adds ``permissions.sessionApproval``,
@@ -247,7 +246,7 @@ async def handle_update_app(request: web.Request) -> web.Response:
         # Capture the spawn row BEFORE the stop forgets it, so a failed update can
         # restore it and the rollback restart can re-attribute a survivor.
         #
-        # GPT 6.1: the stop → revoke → replace → final-revoke span runs holding
+        # The stop → revoke → replace → final-revoke span runs holding
         # ``_hold_backend_lifecycle_flock`` so a backend spawn racing the update cannot
         # slip a ``_record_app_pid`` between the stop and a revoke and overwrite the
         # revoked tombstone (which would let the restart adopt an old-code survivor).
@@ -269,7 +268,7 @@ async def handle_update_app(request: web.Request) -> web.Response:
             )
             await _deregister_app_off_loop(name)
 
-            # F2 fence: durably revoke the pre-update row BEFORE update_app replaces
+            # Durably revoke the pre-update row BEFORE update_app replaces
             # files. If it cannot be confirmed, REFUSE the replacement (the app is
             # untouched, so the rollback restores it) rather than commit new code over
             # a row that would still vouch for an old-code survivor.

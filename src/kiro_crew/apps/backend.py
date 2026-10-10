@@ -1677,7 +1677,6 @@ if _typing.TYPE_CHECKING:
     # shown, so a misspelled or mis-called ``backend.X`` stays a type error. The
     # composition-contract test pins this list equal to ``_EXPORTS``.
     from kiro_crew.apps.backend_runtime.pidfile import (  # noqa: F401
-        PidfileDeleteFailed,
         PidfileRevokeFailed,
         QuarantineUnreadable,
         _env_spawn_instance,
@@ -1698,7 +1697,6 @@ if _typing.TYPE_CHECKING:
         atomic_write,
         capture_backend_provenance,
         clear_backend_quarantine,
-        forget_backend_provenance,
         group_vouching_available,
         json,
         quarantine_backend,

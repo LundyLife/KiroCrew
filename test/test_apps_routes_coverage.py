@@ -47,8 +47,8 @@ from apps_routes_coverage_helpers import (
 )
 from dashboard_owner_helpers import as_owner
 
-from kiro_crew.apps.backend import clear_backend_notice, record_backend_notice
 import kiro_crew.apps.routes as routes_mod
+from kiro_crew.apps.backend import clear_backend_notice, record_backend_notice
 from kiro_crew.apps.manager import (
     APP_MANIFEST_FILENAME,
     AppResult,

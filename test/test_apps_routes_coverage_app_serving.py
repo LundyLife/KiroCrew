@@ -433,7 +433,6 @@ class TestResolveAppBackendUrl:
         monkeypatch.setattr(routes_mod, "get_app_manifest", lambda n: None)
         assert _resolve_app_backend_url(APP) is None
 
-
     def test_gateway_managed_fixed_port_refuses_without_a_tracked_port(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

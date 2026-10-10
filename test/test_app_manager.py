@@ -1651,7 +1651,7 @@ class TestUninstallRevokesBackendProvenance:
     def test_a_partial_rmtree_that_deleted_the_record_keeps_the_row_revoked(
         self, tmp_path, app_home, monkeypatch
     ) -> None:
-        """GPT (round 3): rmtree is not atomic, so a partial failure can delete
+        """rmtree is not atomic, so a partial failure can delete
         installed.json BEFORE it raises — and the surviving backend this revoke
         guards against can itself cause that partial failure (open handles on
         Windows). The uninstall's except arm must then NOT un-revoke the old spawn

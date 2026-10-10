@@ -31,8 +31,8 @@ from apps_routes_coverage_helpers import (
     _setup_env,
 )
 
-from kiro_crew.apps.backend import clear_backend_notice, record_backend_notice
 import kiro_crew.apps.routes as routes_mod
+from kiro_crew.apps.backend import clear_backend_notice
 from kiro_crew.apps.manager import AppResult, disable_app, enable_app, register_external_app
 from kiro_crew.apps.routes import register_app_routes
 
@@ -573,7 +573,7 @@ class TestUpdateApp:
         assert installed["sourceUrl"] == reviewed
         assert not (home / "apps" / APP / "attacker.py").exists()
 
-
+    @pytest.mark.asyncio
     async def test_provenance_invalidation_reports_confirmed_vs_unconfirmed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -594,7 +594,6 @@ class TestUpdateApp:
         assert await routes_mod._invalidate_provenance_before_restart("app") is False
 
     @pytest.mark.asyncio
-
     async def test_registry_update_committed_but_provenance_write_fails_keeps_the_row_revoked(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -603,12 +602,15 @@ class TestUpdateApp:
         # so install_from_registry returns ok=False WITH committed=True. The route
         # must NOT treat that as a rollback: restoring the pre-update spawn record
         # would let the recovery adopt an old-code survivor as the updated backend.
-        # The row stays revoked and the backend is not restarted (fail-closed).
+        # The row stays revoked and the backend is not restarted (fail-closed). It is
+        # also not a clean success: the failure is surfaced to the UI as a coded 500
+        # with the error, and a notice names the provenance write as the cause.
         _setup_env(tmp_path, monkeypatch)
         _install(tmp_path)
         enable_app(APP)
         restored: list[str] = []
         started: list[str] = []
+        notices: list[str] = []
 
         async def _committed_then_failed(name: str, **kwargs: Any) -> dict[str, Any]:
             # ok=False but the install already committed; the new code is in place.
@@ -628,19 +630,27 @@ class TestUpdateApp:
         monkeypatch.setattr(routes_mod, "_register_app_off_loop", _register)
         monkeypatch.setattr(routes_mod, "stop_app_backend", lambda n: None)
         monkeypatch.setattr(routes_mod, "start_app_backend", lambda n: started.append(n))
+        monkeypatch.setattr(routes_mod, "record_backend_notice", lambda n, msg: notices.append(msg))
 
         async with TestClient(TestServer(_make_app(dashboard_user="owner"))) as client:
             resp = await client.post(f"/api/apps/{APP}/update", json={})
-            # The update landed on disk, so the HTTP transaction is not a 4xx failure.
-            assert resp.status == 200
+            # Not a clean success: the update's files landed but its backend could not
+            # be registered, so the UI gets a coded 500 carrying the error.
+            assert resp.status == 500
+            body = await resp.json()
+            assert body["ok"] is False
+            assert body["error"] == "disk full"
+            assert body["code"] == "provenance_not_recorded"
 
         # The pre-update spawn record is NOT restored over committed new code, and
         # the backend is NOT restarted — nothing may be adopted against the stale row.
         assert restored == [], "a committed update must not restore the old spawn record"
         assert started == [], "a committed-but-provenance-failed update must not restart"
+        # A notice is recorded that names the failed provenance write (not a port-holder).
+        assert notices, "a committed-but-provenance-failed update must record a notice"
+        assert "could not be registered" in notices[-1]
 
     @pytest.mark.asyncio
-
     async def test_local_update_refuses_when_pre_replacement_revoke_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -678,7 +688,6 @@ class TestUpdateApp:
         assert replaced == [], "update_app must NOT replace files when the revoke could not persist"
 
     @pytest.mark.asyncio
-
     async def test_update_holds_the_lifecycle_flock_across_revoke_and_replacement(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -737,7 +746,6 @@ class TestUpdateApp:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failure", ["revoke", "replace"])
-
     async def test_a_failed_update_restores_the_row_before_releasing_the_flock(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
     ) -> None:
@@ -790,7 +798,6 @@ class TestUpdateApp:
         assert "restart" in events[events.index("flock-exit") + 1 :], events
 
     @pytest.mark.asyncio
-
     async def test_an_update_that_skips_its_restart_says_so(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1065,7 +1072,7 @@ class TestUninstallRefusals:
             assert resp.status == 400
             assert (await resp.json())["error"] == "permission denied"
 
-
+    @pytest.mark.asyncio
     async def test_provenance_deleted_only_at_the_commit_boundary(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1094,7 +1101,6 @@ class TestUninstallRefusals:
         assert order == ["uninstall_app"]
 
     @pytest.mark.asyncio
-
     async def test_failed_uninstall_never_touches_provenance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1115,7 +1121,6 @@ class TestUninstallRefusals:
             assert resp.status == 400
 
     @pytest.mark.asyncio
-
     async def test_interruption_before_commit_leaves_the_provenance_row_intact(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1142,7 +1147,6 @@ class TestUninstallRefusals:
             assert resp.status == 500
 
     @pytest.mark.asyncio
-
     async def test_unconfirmed_delete_at_commit_is_logged_not_aborted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1397,8 +1401,6 @@ async def test_update_stops_the_backend_before_deregistering_resources(
     ], f"backend must be stopped before its resources are scrubbed, got {order}"
 
 
-
-
 class TestInvalidateProvenanceBeforeRestart:
     """GPT 6.1: a successful update durably REVOKES the pre-update spawn record and
     RETAINS the revoked tombstone (it is not deleted) — a fresh spawn's
@@ -1499,6 +1501,8 @@ class TestRestoreAppAfterFailedUpdate:
         monkeypatch.setattr(
             routes_mod, "_unrevoke_app_pid", lambda n, row: restored.append((n, row))
         )
+        # The rollback restored the app's record, so the row is un-revoked.
+        monkeypatch.setattr(routes_mod, "get_app", lambda n: {"name": n})
 
         async def _may_run(_name: str) -> bool:
             return False  # app is DISABLED -> early return after the restore
@@ -1531,6 +1535,8 @@ class TestRestoreAppAfterFailedUpdate:
         order: list[str] = []
 
         monkeypatch.setattr(routes_mod, "_unrevoke_app_pid", lambda n, row: order.append("restore"))
+        # The rollback restored the app's record, so the row is un-revoked.
+        monkeypatch.setattr(routes_mod, "get_app", lambda n: {"name": n})
 
         async def _may_run(_name: str) -> bool:
             return True
@@ -1548,6 +1554,31 @@ class TestRestoreAppAfterFailedUpdate:
         # Restore happens first, then register, then restart, and the rollback does
         # not put the row back a second time.
         assert order == ["restore", "register", "start"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_rollback_keeps_the_row_revoked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When update_app's own rollback also failed, the row stays revoked.
+
+        A double fault: the update's copy fails AND the rollback cannot undo it, leaving
+        the record (installed.json) ABSENT -- the app is not installed. Un-revoking
+        the saved row then would leave a live row for a name with no app, and a same-name
+        reinstall (which does not revoke or replace the row before starting) would adopt
+        the surviving old backend against it. So the un-revoke is gated on the record
+        still being present: a rollback that left it gone keeps the row REVOKED, which is
+        what refuses the survivor on the next install.
+        """
+        preserved = {"pid": 7, "start_time": "s", "port": 9000, "spawn_instance": "sp"}
+        restored: list[Any] = []
+        monkeypatch.setattr(routes_mod, "_unrevoke_app_pid", lambda n, row: restored.append(row))
+        # The rollback FAILED: installed.json is gone, so the app is not installed.
+        monkeypatch.setattr(routes_mod, "get_app", lambda n: None)
+
+        await routes_mod._restore_provenance_after_failed_update("ext", preserved)
+
+        # The row is NOT un-revoked -- it stays revoked to refuse a survivor adoption.
+        assert restored == [], "a failed rollback must keep the spawn row revoked"
 
     @pytest.mark.asyncio
     async def test_no_preserved_row_restores_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:

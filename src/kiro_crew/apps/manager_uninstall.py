@@ -141,7 +141,7 @@ def uninstall_app(name: str, *, keep_data: bool = True, retired_builtin: bool = 
     )
     from kiro_crew.apps.backend_runtime.tracking import app_backend_lifecycle_flock
 
-    # GPT 6.1: hold the per-app lifecycle flock across BOTH the revoke and the
+    # Hold the per-app lifecycle flock across BOTH the revoke and the
     # file removal. The spawn path holds this same cross-process lock while it
     # persists its pidfile record, so without it a CLI uninstall racing an
     # in-flight spawn can revoke+remove in the window before the spawn's
@@ -150,7 +150,7 @@ def uninstall_app(name: str, *, keep_data: bool = True, retired_builtin: bool = 
     # runs OFF the event loop (dashboard via to_thread, CLI synchronously), so a
     # blocking wait here is safe and is exactly the intended serialization.
     #
-    # GPT 6.1 / Opus 5.5: ENTERING the flock is itself part of the compensated
+    # ENTERING the flock is itself part of the compensated
     # transaction. flock_exclusive -> file_lock gives up after the 300s ceiling and
     # raises OSError (and EACCES/ENOENT opening the lockfile raise on entry too) —
     # a spawn provisioning with pip past that ceiling is plausible in normal use.
@@ -514,7 +514,7 @@ def uninstall_app(name: str, *, keep_data: bool = True, retired_builtin: bool = 
             # (expected_app=meta): rmtree is not atomic, so a partial failure can delete
             # installed.json BEFORE it raises, and the surviving backend this guard exists
             # for can itself cause that partial failure (open handles on Windows). If the
-            # record no longer matches the app we revoked for, the uninstall effectively
+            # record does not match the app we revoked for, the uninstall effectively
             # removed it, so un-revoking would re-arm the old row for whatever a same-name
             # reinstall rebinds the port with — exactly the misattribution the revoke
             # closed. Leave the row revoked (fail-closed) when the record is gone or changed.

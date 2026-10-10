@@ -447,6 +447,16 @@ def _restart_exited_backend(ap: AppProcess, returncode: int | None) -> bool:
                     )
                     if replacement is not None:
                         stop_app_backend(app_name, _expected=replacement)
+                    # A concurrent stop/supersede won the race after this spawn, so THIS
+                    # restart is the losing party and does NOT own the leader row. The
+                    # winning stop may already have RESTORED that row (an ordinary stop
+                    # that found a detached survivor keeps the recovery row), and the
+                    # ``finally``'s ``_forget_exited_leader_row`` would then delete the row
+                    # the stop just put back -- stranding the survivor so the next enable
+                    # refuses it as unattributed. Disarm the drop, exactly as the two
+                    # identity-moved verdicts above and the ``continue`` path below do: a
+                    # losing restart leaves row cleanup to the operation that won.
+                    leader_row_superseded = False
                     return False
                 if not superseding_start:
                     if shutdown_event.is_set() or _app_enabled_state(app_name) is not True:
@@ -456,6 +466,10 @@ def _restart_exited_backend(ap: AppProcess, returncode: int | None) -> bool:
                         )
                         if replacement is not None:
                             stop_app_backend(app_name, _expected=replacement)
+                        # Same losing-party verdict as the cancellation above: a stop or
+                        # disable landed after the spawn and may have restored the row, so
+                        # this restart must not let the ``finally`` drop it.
+                        leader_row_superseded = False
                         return False
                     if not backend_still_declared:
                         return True
