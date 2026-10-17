@@ -521,7 +521,16 @@ def _url_payload_command(n: int) -> str:
 #: Raised by 12, from 32,601, for the crewmate folder's state files in ``paths_lists``
 #: (owners, kits, revoked approvals, tool access, migration ledger), write-denied
 #: like the folder itself. Data, not rule logic: the matcher is unchanged.
-_PACKAGE_LINE_BUDGET = 32_613
+#:
+#: Raised again, from 32,613, for the HTTP/JSON bearer branch keeping its non-secret
+#: prefix: a named ``bearer_prefix`` group captures the header name, separator, quote
+#: and ``Bearer`` scheme so pass 1 redacts only the token after it and a JSON/header
+#: document parses. The comment and split branch live in ``redaction_patterns``, the
+#: value-only span in ``redaction``'s ``_credential_redaction_plan``, and the matching
+#: keep in ``text_redaction``'s stream ceiling discard (a sibling prefix regex and the
+#: pure-bearer keep) so a streamed Bearer value fails closed to the same output. No
+#: credential branch, match or pass moved; only the Bearer branch's redacted span.
+_PACKAGE_LINE_BUDGET = 32_649
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
