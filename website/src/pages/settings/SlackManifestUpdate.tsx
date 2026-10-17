@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { Check, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react'
 import { Badge, Btn } from '../../components/ui'
 import ErrorNotice from '../../components/ErrorNotice'
 import { api, type SlackConfigData, type SlackManifestChange, type SlackManifestStatus } from '../../api/client'
@@ -122,12 +122,14 @@ function ChangeLines({ change, missing, scopesKnown, pending }: {
 const installGeneration = new WeakMap<QueryClient, number>()
 const generationOf = (qc: QueryClient) => installGeneration.get(qc) ?? 0
 
-/** Forget everything read about the installed app: its status reading and the
- *  leftover scopes confirmed from earlier readings. For when the bot token
- *  changes, which may point at a different app; the reading is then re-fetched
- *  from scratch rather than leaving the old app's reading in place. */
+/** Forget everything read about the installed app: its status reading, the
+ *  leftover scopes confirmed from earlier readings and a failed Check again.
+ *  For when the bot token changes, which may point at a different app; the
+ *  reading is then re-fetched from scratch rather than leaving the old app's
+ *  reading in place. */
 export function forgetSlackInstallReading(qc: QueryClient): Promise<void> {
   installGeneration.set(qc, generationOf(qc) + 1)
+  qc.setQueryData(RECHECK_FAILED_KEY, null)
   void qc.resetQueries({ queryKey: LEFTOVER_KEY })
   return qc.resetQueries({ queryKey: ['slack-manifest-status'] })
 }
@@ -168,6 +170,26 @@ function useConfirmedLeftover(saved: string): string[] {
   return data.saved === saved ? data.scopes : NO_SCOPES
 }
 
+/** Which reading (its ``dataUpdatedAt``) a failed Check again was meant to
+ *  replace. In the query cache, not component state, so the switch notes above
+ *  this panel read the same answer; a newer reading clears it on its own, since
+ *  a failed check must not keep a good reading hidden. Never fetched. */
+const RECHECK_FAILED_KEY = ['slack-manifest-recheck-failed']
+export function useInstallRecheckFailed(dataUpdatedAt: number): [boolean, (failed: boolean) => void] {
+  const qc = useQueryClient()
+  const { data } = useQuery<number | null>({
+    queryKey: RECHECK_FAILED_KEY,
+    queryFn: () => null,
+    initialData: null,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  })
+  const set = useCallback((failed: boolean) => {
+    qc.setQueryData<number | null>(RECHECK_FAILED_KEY, failed ? qc.getQueryState(['slack-manifest-status'])?.dataUpdatedAt ?? 0 : null)
+  }, [qc])
+  return [data !== null && data === dataUpdatedAt, set]
+}
+
 /** A Slack call that failed outright (network, Slack error) rather than one
  *  that answered without the scope header: a failure, so it is an error. */
 function checkFailed(status: SlackManifestStatus | undefined): boolean {
@@ -190,10 +212,7 @@ export function SlackManifestUpdate({ data, draft, manifestText, onSave, saving 
   const [copyFailed, setCopyFailed] = useState(false)
 
   const qc = useQueryClient()
-  const [recheckFailed, setRecheckFailed] = useState(false)
-  // A failed Check again speaks only until a newer reading lands (a later
-  // refetch after a save, say); it must not keep a good reading hidden.
-  useEffect(() => { setRecheckFailed(false) }, [statusQ.dataUpdatedAt])
+  const [recheckFailed, setRecheckFailed] = useInstallRecheckFailed(statusQ.dataUpdatedAt)
   // "Check again" bypasses the server's short cache: it is what a user presses
   // right after reinstalling, when a cached "Needs update" would be wrong.
   const recheck = useCallback(async () => {
@@ -217,7 +236,7 @@ export function SlackManifestUpdate({ data, draft, manifestText, onSave, saving 
     } finally {
       setChecking(false)
     }
-  }, [qc])
+  }, [qc, setRecheckFailed])
 
   const copy = useCallback(async () => {
     if (!manifestText) return
@@ -284,6 +303,10 @@ export function SlackManifestUpdate({ data, draft, manifestText, onSave, saving 
   const detailKey = STATUS_DETAIL_KEY[installStatus] ?? STATUS_DETAIL_KEY.unknown
   const noUpdate = current && !pending && savedOn.length > 0 && leftover.length === 0
     && (installStatus === 'up_to_date' || installStatus === 'feature_disabled')
+  // Agent sessions' permanent-step warning whenever the update carries it: a
+  // granted assistant:write does not prove the agent view was saved (the older
+  // assistant view holds that scope too), and Slack reports no features.
+  const agentSessionsWarning = savedOn.includes('agent_sessions')
 
   return (
     <div className="border-t border-border mt-4 pt-4 flex flex-col gap-3" data-testid="slack-manifest-update">
@@ -375,6 +398,25 @@ export function SlackManifestUpdate({ data, draft, manifestText, onSave, saving 
           or an install whose scopes Slack would not report, and only once saved.
           A workspace without the feature, a rejected token or no token at all
           is not fixed by reinstalling, and the line above says what is. */}
+      {/* Agent sessions' one-way step is THIS save in Slack, so its warning sits
+          with the steps that perform it, not on the switch. */}
+      {!pending && !settling && STEPS_HELP.has(installStatus) && agentSessionsWarning && (
+        <div className="flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2" data-testid="slack-manifest-agent-sessions-warning">
+          <AlertTriangle size={12} className="text-warn flex-none mt-0.5" />
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="text-[12px] text-warn">{i18nT('pages.settings.slackPanel.slackCode.agent_sessions_manifest_warning')}</span>
+            {/* Part of the same point: nothing happens until that save. */}
+            <span className="text-[12px] text-text" data-testid="slack-manifest-keeps-working">
+              {i18nT('pages.settings.slackPanel.slackCode.update_keeps_working')}
+            </span>
+          </div>
+        </div>
+      )}
+      {!pending && !settling && STEPS_HELP.has(installStatus) && savedOn.length > 0 && !agentSessionsWarning && (
+        <p className="m-0 text-[12px] text-muted" data-testid="slack-manifest-keeps-working">
+          {i18nT('pages.settings.slackPanel.slackCode.update_keeps_working')}
+        </p>
+      )}
       {!pending && !settling && STEPS_HELP.has(installStatus) && savedOn.length > 0 && (
         <ol className="m-0 pl-5 list-decimal text-[12px] text-text flex flex-col gap-1">
           <li>{i18nT('pages.settings.slackPanel.slackCode.step_copy')}</li>
