@@ -7,13 +7,16 @@
  * read the restart badges make.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, renderHook, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
 
 import { renderWithProviders } from './helpers'
 import { api, type SlackConfigData, type SlackManifestStatus } from '../api/client'
 import { SlackPanel } from '../pages/settings/SlackPanel'
 import { slackCodePayload, slackCodeDraftFrom } from '../pages/settings/SlackCodePanel'
+import { forgetSlackInstallReading, useInstallRecheckFailed } from '../pages/settings/SlackManifestUpdate'
 import { markModelsDegraded } from '../providers/modelListHealth'
 
 beforeEach(() => {
@@ -62,6 +65,7 @@ function config(over: Partial<SlackConfigData> = {}): SlackConfigData {
     bot_token_set: true, app_token_set: true, bot_token_preview: 'xoxb-••••', app_token_preview: 'xapp-••••',
     owner_id: 'U000OWNER', command: 'kirocrew', allowed_enterprise_ids: [],
     reactions_enabled: true, show_thinking: true,
+    agent_sessions: false,
     code_channels: false,
     code_channel_defaults: { folder: null, agent: null, model: null, reasoning_effort: null },
     code_channel_effective: {
@@ -101,7 +105,7 @@ describe('Slack Code payload', () => {
     const saved = slackCodeDraftFrom(config({ code_channel_defaults: { folder: 'aaaaaaaaaaaa', agent: null, model: 'gone-model', reasoning_effort: null } }))
     expect(slackCodePayload(saved, saved)).toEqual({})
     expect(slackCodePayload({ ...saved, effort: 'high' }, saved)).toEqual({ code_channel_defaults: { reasoning_effort: 'high' } })
-    expect(slackCodePayload({ ...saved, folder: '', switches: { code_channels: true } }, saved)).toEqual({
+    expect(slackCodePayload({ ...saved, folder: '', switches: { agent_sessions: false, code_channels: true } }, saved)).toEqual({
       code_channels: true,
       code_channel_defaults: { folder: null },
     })
@@ -113,6 +117,67 @@ describe('Slack Code payload', () => {
   })
 })
 
+describe('Agent sessions switch', () => {
+  it('flips on without a confirmation and its note says only what the switch changes', async () => {
+    const { save } = seed()
+    await hydrated()
+    const note = screen.getByTestId('slack-agent-sessions-note')
+    // The one name the steps and buttons use, "app manifest", glossed in plain words.
+    expect(note).toHaveTextContent('Turning this on changes nothing in Slack yet. It only adds to the app manifest, the setup text you copy into Slack in the steps below.')
+    // The permanence warning lives at the update steps alone: neither the switch
+    // nor its note says "permanent", and the intro never calls this undoable.
+    expect(note).not.toHaveTextContent(/permanent|safe/i)
+    expect(screen.getByTestId('slack-code-switches')).not.toHaveTextContent(/permanent/i)
+    expect(screen.getByTestId('slack-code-section')).not.toHaveTextContent('You can turn it off')
+    expect(note.className).toContain('text-muted')
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Agent sessions' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Agent sessions' })).toBeChecked()
+    // The switch does not repeat the permanence warning in a box of its own.
+    expect(screen.queryAllByText(/Chat and History tabs/)).toHaveLength(0)
+
+    fireEvent.click(saveBtn())
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][0]).toMatchObject({ agent_sessions: true })
+    expect(save.mock.calls[0][0]).not.toHaveProperty('code_channels')
+  })
+
+  it('turns off without asking', async () => {
+    const { save } = seed({ agent_sessions: true })
+    await hydrated()
+    const toggle = screen.getByRole('switch', { name: 'Agent sessions' })
+    await waitFor(() => expect(toggle).toBeChecked())
+    fireEvent.click(toggle)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(saveBtn())
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[0][0]).toMatchObject({ agent_sessions: false })
+  })
+
+  it('puts the permanent-step warning at the manifest update steps', async () => {
+    seed({ agent_sessions: true }, status({ status: 'needs_update', missing_scopes: ['assistant:write'] }))
+    const panel = await screen.findByTestId('slack-manifest-update', {}, CHAINED)
+    const warning = within(panel).getByTestId('slack-manifest-agent-sessions-warning')
+    expect(warning).toHaveTextContent('Agent sessions: saving this manifest in Slack is permanent.')
+    expect(warning).toHaveTextContent('turning Agent sessions off later does not bring them back')
+    expect(warning.className).toContain('border-warn/40')
+    const steps = within(panel).getByRole('list')
+    expect(warning.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const keeps = within(panel).getAllByTestId('slack-manifest-keeps-working')
+    expect(keeps).toHaveLength(1)
+    expect(keeps[0]).toHaveTextContent('Slack keeps working as before until you update.')
+    expect(warning).toContainElement(keeps[0])
+  })
+
+  it('shows no agent-sessions warning at the steps when only code channels need the update', async () => {
+    seed({ code_channels: true }, status({ status: 'needs_update', missing_scopes: ['code_channels:manage'] }))
+    const panel = await screen.findByTestId('slack-manifest-update', {}, CHAINED)
+    expect(within(panel).queryByTestId('slack-manifest-agent-sessions-warning')).toBeNull()
+    expect(within(panel).getByTestId('slack-manifest-keeps-working')).toBeInTheDocument()
+  })
+})
+
 describe('Code channels card', () => {
   it('labels the switch a preview and says the switch can be undone', async () => {
     seed()
@@ -121,7 +186,7 @@ describe('Code channels card', () => {
     const note = within(section).getByTestId('slack-code-preview-note')
     expect(note).toHaveTextContent('Preview')
     expect(note).toHaveTextContent('Code channels arrive in a later release')
-    expect(section).toHaveTextContent('You can turn it off and remove them later.')
+    expect(section).toHaveTextContent('You can turn code channels off and remove their permissions later.')
     expect(section).not.toHaveTextContent("changes your Slack app's manifest")
   })
 
@@ -807,9 +872,11 @@ describe('Slack Code switch registry', () => {
   it('offers only the registered switches', async () => {
     seed()
     await hydrated()
-    expect(screen.getByRole('switch', { name: 'Code channels' })).toBeInTheDocument()
-    // Agent sessions lands with its runtime: this build offers no switch for it.
-    expect(screen.queryByRole('switch', { name: 'Agent sessions' })).toBeNull()
+    expect(screen.getAllByRole('switch', { name: /^(Agent sessions|Code channels)$/ })).toHaveLength(2)
+    // In registry order: Agent sessions first, then Code channels.
+    const agentSessions = screen.getByRole('switch', { name: 'Agent sessions' })
+    const codeChannels = screen.getByRole('switch', { name: 'Code channels' })
+    expect(agentSessions.compareDocumentPosition(codeChannels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('names a feature the server reports that this build does not register by its raw name', async () => {
@@ -839,6 +906,115 @@ describe('Capability line under a saved toggle', () => {
     expect(screen.queryByTestId('slack-capability')).toBeNull()
   })
 
+  it('drops the "nothing in Slack yet" note once Slack reports Agent sessions live', async () => {
+    seed({
+      agent_sessions: true,
+      agent_sessions_capability: { available: true, reason: '', scope: 'assistant:write' },
+    })
+    await screen.findByTestId('slack-capability', {}, CHAINED)
+    expect(screen.queryByTestId('slack-agent-sessions-note')).toBeNull()
+  })
+
+  it('drops the note once Slack has the setup, even when it refused the token', async () => {
+    seed(
+      {
+        agent_sessions: true,
+        agent_sessions_capability: { available: false, reason: 'not_allowed_token_type', scope: 'assistant:write' },
+      },
+      status({ status: 'up_to_date' }, { features: ['agent_sessions'] }),
+    )
+    await screen.findByTestId('slack-capability', {}, CHAINED)
+    await waitFor(() => expect(screen.queryByTestId('slack-agent-sessions-note')).toBeNull())
+  })
+
+  it('keeps the note when an update is still due, even with assistant:write granted', async () => {
+    // The older assistant view holds that scope too: it does not prove the agent
+    // view was saved, so the steps (and the note pointing at them) stay.
+    seed(
+      {
+        agent_sessions: true,
+        code_channels: true,
+        agent_sessions_capability: { available: false, reason: 'not_allowed_token_type', scope: 'assistant:write' },
+      },
+      status({ status: 'needs_update', missing_scopes: ['code_channels:manage'] }, { features: ['agent_sessions', 'code_channels'] }),
+    )
+    await screen.findByTestId('slack-manifest-update', {}, CHAINED)
+    expect(screen.getByTestId('slack-agent-sessions-note')).toBeInTheDocument()
+  })
+
+  it('keeps the note on a reading taken for another switch set', async () => {
+    seed(
+      {
+        agent_sessions: true,
+        agent_sessions_capability: { available: false, reason: 'not_allowed_token_type', scope: 'assistant:write' },
+      },
+      status({ status: 'up_to_date' }, { features: ['agent_sessions', 'code_channels'] }),
+    )
+    await screen.findByTestId('slack-capability', {}, CHAINED)
+    expect(screen.getByTestId('slack-agent-sessions-note')).toBeInTheDocument()
+  })
+
+  it('brings the note back when a refetch of the install reading fails', async () => {
+    const { getStatus, queryClient } = seed(
+      {
+        agent_sessions: true,
+        agent_sessions_capability: { available: false, reason: 'not_allowed_token_type', scope: 'assistant:write' },
+      },
+      status({ status: 'up_to_date' }, { features: ['agent_sessions'] }),
+    )
+    await waitFor(() => expect(screen.queryByTestId('slack-agent-sessions-note')).toBeNull(), CHAINED)
+    getStatus.mockRejectedValue(new Error('slack down'))
+    await queryClient.refetchQueries({ queryKey: ['slack-manifest-status'] })
+    expect(await screen.findByTestId('slack-agent-sessions-note')).toBeInTheDocument()
+  })
+
+  it('brings the note back when Check again fails, as the steps come back below it', async () => {
+    const { getStatus } = seed(
+      {
+        agent_sessions: true,
+        agent_sessions_capability: { available: false, reason: 'not_allowed_token_type', scope: 'assistant:write' },
+      },
+      status({ status: 'up_to_date' }, { features: ['agent_sessions'] }),
+    )
+    const panel = await screen.findByTestId('slack-manifest-update', {}, CHAINED)
+    await waitFor(() => expect(screen.queryByTestId('slack-agent-sessions-note')).toBeNull())
+    getStatus.mockRejectedValue(new Error('down'))
+    fireEvent.click(within(panel).getByRole('button', { name: /Check again/ }))
+    await waitFor(() => expect(getStatus).toHaveBeenLastCalledWith(true))
+    expect(await screen.findByTestId('slack-agent-sessions-note')).toBeInTheDocument()
+    expect(within(panel).getByRole('list')).toBeInTheDocument()
+  })
+
+  it('keeps the permanent-step warning when assistant:write is already granted', async () => {
+    // An app on the older assistant view holds assistant:write but not the agent
+    // view: the update would still migrate it, which cannot be undone.
+    seed(
+      { agent_sessions: true, code_channels: true },
+      status({ status: 'needs_update', missing_scopes: ['code_channels:manage'] }, { features: ['agent_sessions', 'code_channels'] }),
+    )
+    const panel = await screen.findByTestId('slack-manifest-update', {}, CHAINED)
+    await within(panel).findByRole('list')
+    expect(within(panel).getByTestId('slack-manifest-agent-sessions-warning')).toBeInTheDocument()
+    expect(within(panel).getAllByTestId('slack-manifest-keeps-working')).toHaveLength(1)
+  })
+
+  it('shows the keeps-working line on its own when only code channels are saved on', async () => {
+    seed({ code_channels: true }, status({ status: 'needs_update', missing_scopes: ['code_channels:manage'] }))
+    const panel = await screen.findByTestId('slack-manifest-update', {}, CHAINED)
+    await within(panel).findByRole('list')
+    expect(within(panel).queryByTestId('slack-manifest-agent-sessions-warning')).toBeNull()
+    expect(within(panel).getAllByTestId('slack-manifest-keeps-working')).toHaveLength(1)
+  })
+
+  it('keeps the note while Agent sessions is saved on but not live yet', async () => {
+    seed({
+      agent_sessions: true,
+      agent_sessions_capability: { available: false, reason: 'missing_scope', scope: 'assistant:write' },
+    })
+    await hydrated()
+    expect(await screen.findByTestId('slack-agent-sessions-note')).toBeInTheDocument()
+  })
+
   it('reports a token-type refusal, which no install reading reports, as an error', async () => {
     seed({
       code_channels: true,
@@ -866,5 +1042,37 @@ describe('Capability line under a saved toggle', () => {
     seed({ code_channels_capability: { available: false, reason: 'scopes_unknown', scope: 'code_channels:manage' } })
     await hydrated()
     expect(screen.queryByTestId('slack-capability')).toBeNull()
+  })
+})
+
+
+describe('a failed Check again', () => {
+  function setup() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    const hook = renderHook(({ at }: { at: number }) => useInstallRecheckFailed(at), { wrapper, initialProps: { at: 0 } })
+    return { qc, hook }
+  }
+
+  it('speaks until a newer reading lands', async () => {
+    const { hook } = setup()
+    act(() => hook.result.current[1](true))
+    await waitFor(() => expect(hook.result.current[0]).toBe(true))
+    hook.rerender({ at: 5 })
+    expect(hook.result.current[0]).toBe(false)
+  })
+
+  it('is not carried over to the app a new token points at', async () => {
+    const { qc, hook } = setup()
+    act(() => hook.result.current[1](true)) // failed before any reading landed
+    await waitFor(() => expect(hook.result.current[0]).toBe(true))
+    hook.rerender({ at: 5 }) // a good reading
+    vi.spyOn(api, 'getSlackManifestStatus').mockReturnValue(new Promise(() => {}))
+    await act(async () => { void forgetSlackInstallReading(qc) })
+    // The new app's first reading is still in flight (dataUpdatedAt back at 0):
+    // the old failure must not match it.
+    expect(qc.getQueryData(['slack-manifest-recheck-failed'])).toBeNull()
+    hook.rerender({ at: 0 })
+    await waitFor(() => expect(hook.result.current[0]).toBe(false))
   })
 })
