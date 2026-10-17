@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { Check, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react'
 import { Badge, Btn } from '../../components/ui'
 import ErrorNotice from '../../components/ErrorNotice'
 import { api, type SlackConfigData, type SlackManifestChange, type SlackManifestStatus } from '../../api/client'
@@ -375,6 +375,19 @@ export function SlackManifestUpdate({ data, draft, manifestText, onSave, saving 
           or an install whose scopes Slack would not report, and only once saved.
           A workspace without the feature, a rejected token or no token at all
           is not fixed by reinstalling, and the line above says what is. */}
+      {/* Agent sessions' one-way step is THIS save in Slack, so its warning sits
+          with the steps that perform it, not on the switch. */}
+      {!pending && !settling && STEPS_HELP.has(installStatus) && savedOn.includes('agent_sessions') && (
+        <div className="flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2" data-testid="slack-manifest-agent-sessions-warning">
+          <AlertTriangle size={12} className="text-warn flex-none mt-0.5" />
+          <span className="text-[12px] text-warn">{i18nT('pages.settings.slackPanel.slackCode.agent_sessions_manifest_warning')}</span>
+        </div>
+      )}
+      {!pending && !settling && STEPS_HELP.has(installStatus) && savedOn.length > 0 && (
+        <p className="m-0 text-[12px] text-muted" data-testid="slack-manifest-keeps-working">
+          {i18nT('pages.settings.slackPanel.slackCode.update_keeps_working')}
+        </p>
+      )}
       {!pending && !settling && STEPS_HELP.has(installStatus) && savedOn.length > 0 && (
         <ol className="m-0 pl-5 list-decimal text-[12px] text-text flex flex-col gap-1">
           <li>{i18nT('pages.settings.slackPanel.slackCode.step_copy')}</li>
