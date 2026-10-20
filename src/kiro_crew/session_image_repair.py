@@ -656,6 +656,16 @@ def apply_repair(
         if fd_owned:
             os.close(fd)
         Path(tmp_name).unlink(missing_ok=True)
+        # A failed replacement must not turn the retryable error into a
+        # permanent BackupExistsError.  Keep the sidecar when we cannot prove
+        # that this call left the original transcript intact.
+        if backup_path is not None and expect is not None:
+            try:
+                _refuse_if_moved(path, expect)
+            except (OSError, TranscriptMovedError):
+                pass
+            else:
+                backup_path.unlink(missing_ok=True)
         raise
     return backup_path
 
