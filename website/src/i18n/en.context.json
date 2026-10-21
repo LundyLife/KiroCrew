@@ -872,6 +872,16 @@
     "pages.membersPage.patrol_pause": "Verb on a button: pause the crewmate's watch over its tasks. Not the noun.",
     "pages.membersPage.patrol_resume": "Verb on a button: resume a paused watch. Not the noun.",
     "pages.membersPage.patrol_stopped_runtime": "One-phrase reason the watch stopped: it ran up to its time budget of {{limit}} (a short duration like '7d').",
-    "pages.membersPage.patrol_stopped_cycles": "One-phrase reason the watch stopped: it did as many checks as it was allowed."
+    "pages.membersPage.patrol_stopped_cycles": "One-phrase reason the watch stopped: it did as many checks as it was allowed.",
+    "components.terminalFindBar.find": "Placeholder text in the terminal scrollback search input; the VERB 'find', as in find-in-page.",
+    "components.terminalFindBar.search_scrollback": "Accessible label for the terminal find input. 'Scrollback' is the terminal's output buffer above the viewport.",
+    "components.terminalFindBar.no_results": "Shown in the terminal find bar when the search term matches nothing.",
+    "components.terminalFindBar.match_count": "Terminal find bar position readout, e.g. '3 of 12'. {{index}} is the current match, {{total}} the match count.",
+    "components.terminalFindBar.match_overflow": "Terminal find bar readout when there are too many matches to track a position; shows just the total count.",
+    "components.terminalFindBar.previous_match": "Terminal find bar button: jump to the previous search match.",
+    "components.terminalFindBar.next_match": "Terminal find bar button: jump to the next search match.",
+    "components.terminalFindBar.close_search": "Terminal find bar button: close the search bar.",
+    "components.bottomTerminalPanel.fullscreen": "Menu item: expand the terminal panel to fill the dashboard area.",
+    "components.bottomTerminalPanel.exit_fullscreen": "Menu item: restore the terminal panel from fullscreen to its previous size."
   }
 }
