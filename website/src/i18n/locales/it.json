@@ -17383,6 +17383,7 @@
         "custom_sound_option": "{{name}} (tuo)",
         "channel_member": "Messaggi dei compagni",
         "channel_apps": "Aggiornamenti delle app",
+        "channel_turn": "Errori chat",
         "push_section": "Notifiche push",
         "push_toggle_label": "Avvisami anche quando {{productName}} è chiuso",
         "push_toggle_description": "Un interruttore separato dalle notifiche di sistema qui sopra, che funzionano solo mentre {{productName}} è aperto.",

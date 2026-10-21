@@ -17109,6 +17109,7 @@
         "custom_sound_option": "{{name}} (তোমার)",
         "channel_member": "সঙ্গীদের বার্তা",
         "channel_apps": "অ্যাপ আপডেট",
+        "channel_turn": "চ্যাট ত্রুটি",
         "push_section": "পুশ বিজ্ঞপ্তি",
         "push_toggle_label": "{{productName}} বন্ধ থাকলেও আমাকে জানাও",
         "push_toggle_description": "এটা উপরের সিস্টেম বিজ্ঞপ্তি থেকে আলাদা সুইচ, যেগুলো শুধু {{productName}} খোলা থাকলে কাজ করে।",

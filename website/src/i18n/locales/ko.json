@@ -16847,6 +16847,7 @@
         "custom_sound_option": "{{name}}(내 사운드)",
         "channel_member": "크루메이트 메시지",
         "channel_apps": "앱 업데이트",
+        "channel_turn": "채팅 오류",
         "push_section": "푸시 알림",
         "push_toggle_label": "{{productName}}이(가) 닫혀 있어도 알림 받기",
         "push_toggle_description": "위의 시스템 알림과는 별개의 스위치입니다. 시스템 알림은 {{productName}}이(가) 열려 있을 때만 옵니다.",

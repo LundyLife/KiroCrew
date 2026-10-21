@@ -16835,6 +16835,7 @@
         "custom_sound_option": "{{name}}（自作）",
         "channel_member": "クルーメイトからのメッセージ",
         "channel_apps": "アプリのアップデート",
+        "channel_turn": "チャットエラー",
         "push_section": "プッシュ通知",
         "push_toggle_label": "{{productName}} を閉じていても通知する",
         "push_toggle_description": "上のシステム通知とは別のスイッチです。システム通知は {{productName}} を開いている間だけ届きます。",

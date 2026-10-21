@@ -17657,6 +17657,7 @@
         "custom_sound_option": "{{name}} (твой)",
         "channel_member": "Сообщения напарников",
         "channel_apps": "Обновления приложений",
+        "channel_turn": "Ошибки чата",
         "push_section": "Push-уведомления",
         "push_toggle_label": "Уведомлять, даже когда {{productName}} закрыт",
         "push_toggle_description": "Отдельный переключатель, не то же самое, что системные уведомления выше: они работают, только пока {{productName}} открыт.",

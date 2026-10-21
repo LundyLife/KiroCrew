@@ -17109,6 +17109,7 @@
         "custom_sound_option": "{{name}} (eigener)",
         "channel_member": "Crewmate-Nachrichten",
         "channel_apps": "App-Aktualisierungen",
+        "channel_turn": "Chat-Fehler",
         "push_section": "Push-Benachrichtigungen",
         "push_toggle_label": "Benachrichtige mich auch, wenn {{productName}} geschlossen ist",
         "push_toggle_description": "Ein eigener Schalter, getrennt von den Systembenachrichtigungen oben, die nur funktionieren, solange {{productName}} geöffnet ist.",
