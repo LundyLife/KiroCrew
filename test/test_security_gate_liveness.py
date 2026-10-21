@@ -532,7 +532,12 @@ def _url_payload_command(n: int) -> str:
 #: substitution may expand to nothing in the program word, and
 #: ``#`` / ``<<`` inside an unpaired ``${…}`` / ``$[…]`` open no comment or heredoc.
 #: Each command is read with and without that tracking. Deny-only: no allow widened.
-_PACKAGE_LINE_BUDGET = 32_635
+#: Raised again, from 32,635, for the ``-c`` operand that skips a redirect word, and the
+#: rm floor reading each nested-shell payload through the shared extractor and the
+#: shared data-consumer exemption, with a heredoc body left as data, and the exemption
+#: voided when the raw text holds a splice marker, and a redirect glued to ``-c`` /
+#: ``-S`` read the same way. No pattern moved.
+_PACKAGE_LINE_BUDGET = 32_823
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
