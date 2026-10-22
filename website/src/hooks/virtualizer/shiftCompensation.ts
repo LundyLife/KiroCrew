@@ -15,7 +15,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import { captureAnchorCandsFrom, captureTopAnchorFrom, rowTopFrom } from './anchorGeometry'
-import { heightAnchorStillUsable, shiftCompensationAllowed } from './FollowController'
+import { heightAnchorClampedToCeiling, heightAnchorStillUsable, shiftCompensationAllowed } from './FollowController'
 import { planHeightRetirement, type HeightIndex } from './HeightIndex'
 import type { WindowRange } from './WindowCalculator'
 import type { FollowState, Pinning } from './followPolicy'
@@ -1131,7 +1131,15 @@ export function useShiftCompensation<T>(ctx: {
     // further hard input, so an input-timestamp gate would miss it), or
     // Chromium's native anchoring (which has already absorbed the shift, so
     // the correction is a no-op worth skipping anyway).
-    if (!heightAnchorStillUsable(pending.scrollTop, el.scrollTop)) return
+    //
+    // One move of the viewport is NOT the reader's: the engine clamp a shrinking
+    // commit forces when the capture now sits past the maximum (see
+    // heightAnchorClampedToCeiling). The candidates' tops still carry the whole
+    // move, so the correction below stays exact from the clamped position.
+    if (
+      !heightAnchorStillUsable(pending.scrollTop, el.scrollTop) &&
+      !heightAnchorClampedToCeiling(pending.scrollTop, el)
+    ) return
     // Released reader: the correction IS the candidates, so an empty list is
     // nothing to consume (the followed path above uses a candidate-free
     // sentinel and has already returned by here).
