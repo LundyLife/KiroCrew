@@ -1,19 +1,19 @@
 [
   {
     "id": "credential-exfil-s3-cp",
-    "pattern": "aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+cp .* s3://.*",
+    "pattern": "aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+cp(?=\\s).*\\s(?!--?[a-z]|\\\\\\s)\\S.*\\ss3://.*",
     "category": "credential-exfil",
     "description": "Blocks `aws s3 cp` uploads to an s3:// destination, which can exfiltrate local files or credentials into an attacker-controlled bucket."
   },
   {
     "id": "credential-exfil-s3-mv",
-    "pattern": "aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+mv .* s3://.*",
+    "pattern": "aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+mv(?=\\s).*\\s(?!--?[a-z]|\\\\\\s)\\S.*\\ss3://.*",
     "category": "credential-exfil",
     "description": "Blocks `aws s3 mv` moves to an s3:// destination, which can exfiltrate local files or credentials into an attacker-controlled bucket."
   },
   {
     "id": "credential-exfil-s3-sync",
-    "pattern": "aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+sync .* s3://.*",
+    "pattern": "aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+sync(?=\\s).*\\s(?!--?[a-z]|\\\\\\s)\\S.*\\ss3://.*",
     "category": "credential-exfil",
     "description": "Blocks `aws s3 sync` to an s3:// destination, which can bulk-exfiltrate a local directory tree into an attacker-controlled bucket."
   },

@@ -242,10 +242,22 @@ _NETCAT_EXEC_PATTERN = r"(?<![\w.-])(?<!\w=)nc\s+-e"
 # enumerable, which is why a name-based rule is defensible there and not here.
 
 
+# The s3 cp/mv/sync rows deny an `` s3://`` operand that FOLLOWS another operand
+# (any token after the verb not starting ``-<letter>`` or ``--<letter>``, and not a
+# bare ``\`` line continuation, so a download split over lines with ``\`` passes). That is an upload (local
+# source, s3 destination) or an s3-to-s3 copy, while a download with leading flags
+# (``cp --recursive s3://b/p ./d``) passes: its first operand is the s3:// source
+# and no s3:// follows it. The old ``cp .* s3://`` let the flag supply the space
+# before ``s3://`` and so refused that download. A space-separated flag value
+# counts as an operand, which over-denies ``--profile p s3://b ./d`` rather than
+# letting ``--recursive ./x s3://evil`` read as a flag value; a bare ``-`` (stdin)
+# is an operand; a flag whose value is ``s3://`` is caught by the later ``s3://``.
+# No repeated flag group: ``is_safe_user_regex`` disables a quantified group with
+# inner quantifiers, and a disabled row matches nothing.
 BUILTIN_DENIED_RULES: list[DeniedCommandRule] = [
     DeniedCommandRule(
         id="credential-exfil-s3-cp",
-        pattern="aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+cp .* s3://.*",
+        pattern="aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+cp(?=\\s).*\\s(?!--?[a-z]|\\\\\\s)\\S.*\\ss3://.*",
         category="credential-exfil",
         description=(
             "Blocks `aws s3 cp` uploads to an s3:// destination, which can exfiltrate local "
@@ -254,7 +266,7 @@ BUILTIN_DENIED_RULES: list[DeniedCommandRule] = [
     ),
     DeniedCommandRule(
         id="credential-exfil-s3-mv",
-        pattern="aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+mv .* s3://.*",
+        pattern="aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+mv(?=\\s).*\\s(?!--?[a-z]|\\\\\\s)\\S.*\\ss3://.*",
         category="credential-exfil",
         description=(
             "Blocks `aws s3 mv` moves to an s3:// destination, which can exfiltrate local files "
@@ -263,7 +275,7 @@ BUILTIN_DENIED_RULES: list[DeniedCommandRule] = [
     ),
     DeniedCommandRule(
         id="credential-exfil-s3-sync",
-        pattern="aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+sync .* s3://.*",
+        pattern="aws(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+s3(?:\\s+--?[a-z-]+(?:[= ]\\S+)?)*\\s+sync(?=\\s).*\\s(?!--?[a-z]|\\\\\\s)\\S.*\\ss3://.*",
         category="credential-exfil",
         description=(
             "Blocks `aws s3 sync` to an s3:// destination, which can bulk-exfiltrate a local "
