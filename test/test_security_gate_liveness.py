@@ -532,7 +532,12 @@ def _url_payload_command(n: int) -> str:
 #: substitution may expand to nothing in the program word, and
 #: ``#`` / ``<<`` inside an unpaired ``${…}`` / ``$[…]`` open no comment or heredoc.
 #: Each command is read with and without that tracking. Deny-only: no allow widened.
-_PACKAGE_LINE_BUDGET = 32_635
+#:
+#: Raised by 53, from 32,635, for ``readonly_bash.command_names_git``, the no-approver
+#: hook surface's fail-closed git check: quote and backslash removal, a ``git`` word
+#: search, and the short list of programs that run none of their arguments. It models
+#: no shell grammar, so it refuses more than it must rather than less.
+_PACKAGE_LINE_BUDGET = 32_688
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
