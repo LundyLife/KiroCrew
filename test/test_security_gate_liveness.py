@@ -532,7 +532,14 @@ def _url_payload_command(n: int) -> str:
 #: substitution may expand to nothing in the program word, and
 #: ``#`` / ``<<`` inside an unpaired ``${…}`` / ``$[…]`` open no comment or heredoc.
 #: Each command is read with and without that tracking. Deny-only: no allow widened.
-_PACKAGE_LINE_BUDGET = 32_635
+#:
+#: Raised by 25, from 32,635, for ``exfil.restore_allowed_links``: an allowed host with several
+#: different addresses in one reply pairs its placeholders with its records by order
+#: instead of staying blocked, but only on a row marked ``blocked_links_ordered``, and
+#: every address put back must be the whole URL match that starts where it lands;
+#: plus the redactor's ``_ordered_out`` flag for a link rewritten inside a longer one.
+#: Display-time only; no redaction rule, pattern or threshold moved.
+_PACKAGE_LINE_BUDGET = 32_660
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
