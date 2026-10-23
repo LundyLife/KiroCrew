@@ -532,7 +532,11 @@ def _url_payload_command(n: int) -> str:
 #: substitution may expand to nothing in the program word, and
 #: ``#`` / ``<<`` inside an unpaired ``${…}`` / ``$[…]`` open no comment or heredoc.
 #: Each command is read with and without that tracking. Deny-only: no allow widened.
-_PACKAGE_LINE_BUDGET = 32_635
+#:
+#: Raised by 1, from 32,635, for the ``browser-cookie-import`` entry in
+#: ``_CREW_SECRET_LEAVES``: the imported browser cookies, fenced at the tool gate as
+#: well as masked.
+_PACKAGE_LINE_BUDGET = 32_636
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
