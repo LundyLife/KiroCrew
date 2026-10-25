@@ -458,8 +458,7 @@ export function invokeFileMenuItem(
     slot ? `dashboard:${slot}` : undefined,
   ).then(result => {
     if (typeof result?.message !== 'string' || !result.message.trim()) return
-    const url = (typeof result.url === 'string' ? safeHttpUrl(result.url) : null)
-      ?? (typeof result.link === 'string' ? safeHttpUrl(result.link) : null)
+    const url = typeof result.url === 'string' ? safeHttpUrl(result.url) : null
     // Same host bus as AppHost; no app UI, feed write, or implicit navigation.
     window.dispatchEvent(new CustomEvent('mc:notify', {
       detail: { source: 'file-menu', message: result.message, url: url ?? undefined, type: 'success' },
