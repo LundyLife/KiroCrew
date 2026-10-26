@@ -32,7 +32,7 @@ from typing import Any, Iterator
 import pytest
 
 from kiro_crew import crew_log as lg
-from kiro_crew.crew_log import CrewLog, bus, eager, emit
+from kiro_crew.crew_log import CrewLog, bus, eager, emit, lease
 from kiro_crew.crew_log import projection as crew_log
 from kiro_crew.crew_log import projection_catalogue, slot_prime
 from kiro_crew.crew_log import store as crew_log_store
@@ -70,14 +70,29 @@ RESUME_FOLD = "ledger"
 # --------------------------------------------------------------------------- #
 
 
+#: Every writer handle :func:`_unit` created in the running test. Released at the
+#: test boundary rather than left to refcount: an expected failure (the strict
+#: xfails below) leaves its traceback reachable after the test ends -- through
+#: ``sys.last_exc``, and through a reference cycle only the cyclic collector frees
+#: -- and that traceback holds the test frame, every handle in its locals, and so
+#: every handle's write lease.
+_HANDLES: "list[CrewLog]" = []
+
+
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, _floor_monkeypatch):
-    """Own data home, crew log on, no warm cell, subscriber or worker left over."""
+    """Own data home, crew log on, no warm cell, subscriber, worker or lease left over."""
     _floor_monkeypatch.setenv("KIROCREW_HOME", str(tmp_path / "home"))
     _floor_monkeypatch.setenv("KIROCREW_CREW_LOG", "1")
     _reset()
     yield
     _reset()
+    while _HANDLES:
+        _HANDLES.pop().release_ownership()
+    # The holder table is process-global, so a lease left held here is read as held
+    # by the next test on this worker, in whatever file xdist hands it. Reported
+    # here, where it is created.
+    assert not lease._held, f"a lease outlived its test on this worker: {sorted(lease._held)}"
 
 
 def _reset() -> None:
@@ -217,6 +232,7 @@ def meter(monkeypatch) -> ScanMeter:
 def _unit(unit_id: str, slot: str, *, filler: int, work_items: int = 0) -> CrewLog:
     """One session unit on *slot*: an opener, *work_items* work creates, then filler."""
     handle = CrewLog.create(lg.KIND_SESSION, unit_id, owner="guard", agent="kirocrew", slot=slot)
+    _HANDLES.append(handle)
     handle.append(
         "session/opened",
         {
