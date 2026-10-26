@@ -37,9 +37,13 @@ describe('Schedule page reload', () => {
     await waitFor(() => expect(api.crons).toHaveBeenCalled())
     const reads = vi.mocked(api).crons.mock.calls.length
 
+    // `act` flushes the effects, and `load()` calls `api.crons()` before its
+    // first await, so a reload this refresh started has already been counted.
     act(() => { store.dispatch(triggerRefresh()) })
-    await new Promise(resolve => setTimeout(resolve, 50))
     expect(vi.mocked(api).crons.mock.calls.length).toBe(reads)
+    // The same path does count a cron refresh, so the check above could see one.
+    act(() => { store.dispatch(triggerCronRefresh()) })
+    expect(vi.mocked(api).crons.mock.calls.length).toBe(reads + 1)
   })
 
   it('re-reads the job list when the cron caches go stale', async () => {
