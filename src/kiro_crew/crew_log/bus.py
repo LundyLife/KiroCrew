@@ -76,6 +76,16 @@ class FoldAdvanced(NamedTuple):
 
     ``value`` is the RENDERED projection, not the fold state. A subscriber is a reader,
     and handing it the state would hand it the object the memo is still folding.
+
+    ``kind``, ``base_revision`` and ``delta`` say how the change can be shipped without
+    the whole value (:mod:`kiro_crew.crew_log.fold_delta`). Only a fold in
+    ``fold_delta.DELTA_FOLDS`` sets them. ``kind`` is ``"value"`` for every other event,
+    and for a baseline. For a delta fold it is ``"delta"`` -- ``delta`` holds the ops
+    that turn the value published at ``base_revision`` into this one -- or
+    ``"snapshot_needed"`` when no such ops exist (first publish in this process, a new
+    board generation, a dropped base), with ``base_revision`` 0 and ``delta`` naming the
+    reason. ``value`` is STILL carried on every event during the migration, so a
+    subscriber that ignores the three fields behaves exactly as before.
     """
 
     scope: str
@@ -84,6 +94,9 @@ class FoldAdvanced(NamedTuple):
     revision: int
     value: Mapping[str, Any]
     seq: int
+    kind: str = "value"
+    base_revision: int = 0
+    delta: "Mapping[str, Any] | None" = None
 
 
 #: The two scopes a :class:`FoldAdvanced` names.

@@ -79,6 +79,7 @@ import queue
 import sys
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any, Final, NamedTuple
@@ -744,6 +745,9 @@ def _fold_batch(
         # or one worker unit of a LIVE crew, would take that crew's other cells with it.
         for eager_name in projection.EAGER_SLOT_FOLD_NAMES:
             projection.forget_slot_folds(slot=slot, name=eager_name)
+        # The memo cell is gone, so the next value is a rebuild: publish it as
+        # ``snapshot_needed`` rather than a delta against a board nobody will extend.
+        _forget_published(slot)
     for slot, name in work:
         if projection.slot_fold_over_ceiling(slot, name):
             # The last pass could not keep this cell -- its charge is above the whole
@@ -932,19 +936,106 @@ def _publish_fold(slot: str, name: str, folded: Any) -> None:
     if not isinstance(value, dict):  # pragma: no cover - the read path always renders one
         return
     # boot-path import gate: see this module's docstring and ``_projection``.
-    from kiro_crew.crew_log import bus
+    from kiro_crew.crew_log import bus, fold_delta
 
-    bus.publish(
-        bus.FOLD_ADVANCED,
-        bus.FoldAdvanced(
-            scope=bus.SCOPE_SLOT,
-            key=slot,
-            fold=name,
-            revision=revision,
-            value=value,
-            seq=int(getattr(folded, "seq", 0) or 0),
-        ),
+    seq = int(getattr(folded, "seq", 0) or 0)
+    if name not in fold_delta.DELTA_FOLDS:
+        bus.publish(
+            bus.FOLD_ADVANCED,
+            bus.FoldAdvanced(
+                scope=bus.SCOPE_SLOT, key=slot, fold=name, revision=revision, value=value, seq=seq
+            ),
+        )
+        return
+    # Under the lock from the diff to the publish, so the fold worker and a background
+    # prime publishing the same cell cannot hand a subscriber two deltas off one base.
+    with _published_lock:
+        event = _delta_event(slot, name, revision, value, seq)
+        bus.publish(bus.FOLD_ADVANCED, event)
+
+
+#: The last render published per (slot, delta fold), as ``(revision, value)``: the base
+#: the next delta is computed against. Bounded LRU, because each entry holds a whole
+#: board render (up to a few MB on the largest board measured). A board pushed out, or
+#: dropped on its ``session/closed``, gets ``snapshot_needed`` on its next publish, which
+#: is the same answer a fresh process gives -- correct, and one snapshot pull dearer.
+_PUBLISHED_CAP = 64
+_published: "OrderedDict[tuple[str, str], tuple[int, dict[str, Any]]]" = OrderedDict()
+# Re-entrant: a subscriber that publishes the same cell on this thread must not deadlock.
+_published_lock = threading.RLock()
+
+
+def _delta_event(slot: str, name: str, revision: int, value: dict[str, Any], seq: int) -> Any:
+    """The event for one publish of a delta fold, recording *value* as the next base.
+
+    Caller holds ``_published_lock``. A diff that raises falls back to
+    ``snapshot_needed``: a receiver that pulls once is always right, and a wrong delta
+    would draw a wrong board until the next reload.
+    """
+    from kiro_crew.crew_log import bus, fold_delta
+
+    base = _published.get((slot, name))
+    kind = fold_delta.KIND_SNAPSHOT_NEEDED
+    base_revision = 0
+    ops: "dict[str, Any]"
+    if base is None:
+        ops = {"reason": fold_delta.REASON_NO_BASE}
+    elif revision <= base[0]:
+        # An older or repeated revision: a receiver holding the base drops it as a
+        # duplicate. The recorded base stays the newer one.
+        ops = {"reason": fold_delta.REASON_REVISION}
+    else:
+        reason = fold_delta.snapshot_reason(base[1], value)
+        if reason:
+            ops = {"reason": reason}
+        else:
+            try:
+                ops = fold_delta.diff_work(base[1], value)
+                kind = fold_delta.KIND_DELTA
+                base_revision = base[0]
+            except Exception:
+                _log_exc(logging.WARNING, "crew log delta failed for %s/%s", slot, name)
+                ops = {"reason": fold_delta.REASON_SHAPE}
+    if base is None or revision > base[0]:
+        _published[(slot, name)] = (revision, value)
+        _published.move_to_end((slot, name))
+        while len(_published) > _PUBLISHED_CAP:
+            _published.popitem(last=False)
+    return bus.FoldAdvanced(
+        scope=bus.SCOPE_SLOT,
+        key=slot,
+        fold=name,
+        revision=revision,
+        value=value,
+        seq=seq,
+        kind=kind,
+        base_revision=base_revision,
+        delta=ops,
     )
+
+
+def published_revision(slot: str, name: str) -> int:
+    """The revision of the last publish of *slot*'s delta fold *name*, 0 when none.
+
+    What a snapshot read labels itself with, so a receiver can apply the next delta
+    on it (its base is this revision). No I/O.
+    """
+    with _published_lock:
+        base = _published.get((slot, name))
+        return base[0] if base is not None else 0
+
+
+def _forget_published(slot: str) -> None:
+    """Drop *slot*'s recorded bases; its next publish is ``snapshot_needed``."""
+    with _published_lock:
+        for key in [key for key in _published if key[0] == slot]:
+            del _published[key]
+
+
+def reset_published_for_tests() -> None:
+    """Forget every recorded base."""
+    with _published_lock:
+        _published.clear()
 
 
 def _slot_of(unit_id: str) -> str:
@@ -1111,3 +1202,4 @@ def stop_for_tests() -> None:
         _queued = 0
         _settled = 0
         _progress.notify_all()
+    reset_published_for_tests()
