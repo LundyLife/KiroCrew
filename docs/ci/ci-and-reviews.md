@@ -212,6 +212,27 @@ Three structural facts explain most of the rest:
   `pull-requests: read`, never checks out code, and
   `test/test_main_macos_failure_watch.py` pins the names, the gate and the
   paging with `gh` stubbed.
+- **A red test on any leg of main opens one `Main is red:` issue.** With the
+  merge queue off, the push run of `CI` runs the whole matrix and a red Linux or
+  Windows shard there reaches nobody. `main-red-watch.yml` runs on
+  `workflow_run: completed` of `CI`; for a push to `main` that ended `failure` or
+  `timed_out`, it reads the log of each failed job and takes the node ids and
+  message prefixes (first 80 characters) from pytest's short test summary
+  (`.github/scripts/main_red_nodeids.py`). It opens or updates one issue,
+  `Main is red: <first node id>`, under the `main-red` label (found by title
+  prefix if the label cannot be created), holding that set, the first-red SHA and
+  the streak. A run that names no node id (a Fast Gate barrier timeout, a Coverage
+  Gate failure) writes nothing, and a cancelled run never reaches the job. The
+  body's `Fix in progress:` line is rewritten on every main run from the open pull
+  requests that cross-reference the issue, so a second author sees that a fix
+  exists and can put `Fixes #<issue>` in their own. A later push run, or a
+  successful re-run of the last red one, comments and closes the issue only if
+  it ran the full backend suite (the `Backend Tests` shards' coverage upload ran,
+  which `ci.yml` skips on a frontend-only or leaf-only scope). It is warn only: it
+  writes an issue, comments on no pull request, assigns and mentions no one but
+  the author of a cross-referencing fix. It holds `actions: read`,
+  `contents: read` and `issues: write`, and `test/test_main_red_watch.py` pins the
+  name, the gate and the parsing, and runs the step with `gh` stubbed.
 - **Do not merge a feature PR past a non-green `PR Readiness`.** The ruleset's
   bypass actors can, and a `pending` readiness is not a judgement about a red
   lane: it skips lanes that have not reported yet. #11947 merged 14 s after its
