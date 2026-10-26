@@ -41,11 +41,11 @@ export function CrewModeChip({ onTurnOn, disabled = false, busy = false, describ
       title={hint}
       disabled={disabled}
       onClick={busy ? undefined : onTurnOn}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-[12px] transition-colors cursor-pointer ${state} border-transparent glass-hover text-muted hover:text-text`}
+      className={`crew-chip inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-[12px] font-semibold transition-colors cursor-pointer ${state}`}
     >
-      <KiroGhostMark size={13} />
+      <KiroGhostMark size={13} className="inline-block shrink-0 crew-tone-aim" />
       {/* Just the name; what it does is in the tooltip. */}
-      <span>{i18nT('components.crewMode.chip_off')}</span>
+      <span className="crew-chip-text">{i18nT('components.crewMode.chip_off')}</span>
     </Glass>
   )
 }
