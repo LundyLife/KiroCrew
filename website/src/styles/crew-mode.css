@@ -4,8 +4,8 @@
    and the steer composer's ring. It runs from the theme's own `--aim` (the
    crew's purple) to `--info` (its blue), so a theme that moves either token
    moves Crew Mode with it, light and dark alike. Nothing here covers other UI:
-   each rule colours the element it is set on, and the one motion is a single
-   glow-in that ends on a static frame and is skipped under reduced motion. */
+   each rule colours the element it is set on. Cards and chips wear a fill and
+   a border, never a glow or a shadow. */
 
 .crew-grad {
   background-image: linear-gradient(90deg, var(--aim), var(--info));
@@ -19,7 +19,8 @@
   color: transparent;
 }
 
-/* The root row: a tinted card with a soft glow, still one list row. */
+/* The root row: a tinted card with a border, still one list row. No glow and
+   no shadow, in any state. */
 .crew-card {
   background-image: linear-gradient(
     120deg,
@@ -28,14 +29,11 @@
     transparent 100%
   );
   border: 1px solid color-mix(in srgb, var(--aim) 45%, var(--border));
-  box-shadow: 0 0 14px -2px color-mix(in srgb, var(--aim) 35%, transparent);
   border-radius: var(--radius-lg, 12px);
-  animation: crew-glow-in 0.6s ease-out 1 both;
 }
 
 .crew-card[data-active="true"] {
   border-color: color-mix(in srgb, var(--aim) 75%, var(--border));
-  box-shadow: 0 0 18px -2px color-mix(in srgb, var(--aim) 55%, transparent);
 }
 
 /* The steer composer: the composer in a worker view, ringed in the crew's purple. */
@@ -43,18 +41,6 @@
   border-radius: var(--radius-lg, 12px);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--aim) 70%, transparent),
     0 0 16px -4px color-mix(in srgb, var(--aim) 50%, transparent);
-}
-
-@keyframes crew-glow-in {
-  from {
-    box-shadow: 0 0 0 0 transparent;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .crew-card {
-    animation: none;
-  }
 }
 
 /* One frame for the steer composer: the ring IS the composer's card, so the
