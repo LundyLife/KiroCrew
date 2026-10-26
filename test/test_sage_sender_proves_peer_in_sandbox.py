@@ -1,29 +1,32 @@
-"""The Code Review Sage peer proof, run for real from INSIDE the Linux sandbox.
+"""The Code Review Sage peer proof, run for real from INSIDE the agent sandbox.
 
 The Code Review Sage backend's internal-secret senders go through the gateway
 peer proof (``_owner_verified_secret_urlopen``). The Sage backend itself runs
-under the namespace sandbox (``apps/backend.py`` -> ``wrap_argv(mode="standard")``
--> ``unshare(CLONE_NEWUSER)`` then ``unshare(CLONE_NEWNS)``), so the premise that
-matters for availability is: can the proof reach ``MATCH`` from inside that sealed
-mount namespace?  If the seal masks the gateway pidfile (``run/gateway-<port>.pid``
-+ its ``.start`` sidecar), the dashboard unix socket, or ``/proc/<peer-pid>`` (the
-freshness token read), the proof fails closed and every Sage review spawn and
-publish breaks on that platform.
+confined (``apps/backend.py`` -> ``wrap_argv(mode="standard")``): under the Linux
+namespace sandbox (``unshare(CLONE_NEWUSER)`` then ``unshare(CLONE_NEWNS)``) or,
+on macOS, under ``sandbox-exec`` with the Seatbelt profile. So the premise that
+matters for availability is: can the proof reach ``MATCH`` from inside that
+confinement?  If it hides the gateway pidfile (``run/gateway-<port>.pid`` + its
+``.start`` sidecar), the dashboard unix socket, or the peer's freshness token, the
+proof fails closed and every Sage review spawn and publish breaks on that platform.
 
-This test plays the gateway in the parent process -- it records the run marker for
+These tests play the gateway in the parent process -- it records the run marker for
 its OWN pid (``write_marker``) and serves the dashboard unix socket, so the peer the
-child sees over ``SO_PEERCRED`` is this process and the recorded pid matches it --
-then runs the proof in a child confined by the real ``standard`` sandbox, against the
-real primitive, and asserts the proof returns the gateway's response (a live
-``MATCH``), not ``_GatewayPeerRefused``.
+child sees over the socket's peer credentials is this process and the recorded pid
+matches it -- then run the proof in a child confined by the real ``standard``
+sandbox, against the real primitive, and assert the proof returns the gateway's
+response (a live ``MATCH``), not ``_GatewayPeerRefused``.
 
-The child also reports its mount namespace and the sandbox marker, so a run that
-never actually entered the sandbox fails loudly instead of passing on the host's
-own view.  Linux needs unprivileged user and mount namespaces, which the
-namespace-sandbox CI job provides and the shard runners do not, so there this test
-skips with that reason; it is wired into that job's file list in ``ci.yml``.  The
-macOS Seatbelt path is NOT covered here (no CI lane builds a sandboxed backend on
-Seatbelt); the PR body and its First Principles disposition say so.
+The child also reports evidence that it really ran confined, so a run that never
+entered the sandbox fails loudly instead of passing on the host's own view.
+
+* Linux needs unprivileged user and mount namespaces. The namespace-sandbox CI job
+  provides them and asserts ``userns_available()`` before running this file (it is
+  in that job's file list in ``ci.yml``); elsewhere the Linux case skips with that
+  reason.
+* macOS runs the Seatbelt case wherever ``/usr/bin/sandbox-exec`` exists, which
+  includes the macOS CI lane, and skips only where it is absent. The case also
+  fails if ``wrap_argv`` did not put ``sandbox-exec`` in front of the child.
 """
 
 from __future__ import annotations
@@ -46,21 +49,25 @@ from kiro_crew.dashboard.urls import dashboard_socket_path
 from kiro_crew.instances import run_marker
 from kiro_crew.sandbox import userns_available
 
-pytestmark = [
-    pytest.mark.skipif(sys.platform != "linux", reason="the namespace launcher is Linux-only"),
-    pytest.mark.skipif(
-        not userns_available(),
-        reason="this host cannot build the namespace sandbox (no unprivileged user and mount "
-        "namespaces); the namespace-sandbox CI job provides them and asserts userns_available()",
-    ),
-]
+pytestmark = pytest.mark.skipif(
+    sys.platform not in ("linux", "darwin"),
+    reason="the agent sandbox this proves is the Linux namespace launcher or macOS Seatbelt",
+)
 
 #: A port number used only to name the run marker and the socket; nothing binds TCP.
 _PORT = 48137
 
+#: ``sun_path`` capacity: 108 bytes on Linux, 104 on macOS.
+_SUN_PATH_MAX = 104 if sys.platform == "darwin" else 108
+
+_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+
 # The agent's side, run under the real sandbox. It runs the UNMONKEYPATCHED proof and
 # reports the outcome: a response body is a live MATCH; ``_GatewayPeerRefused`` is a
-# fail-closed refusal (the thing this test exists to rule out inside the sandbox).
+# fail-closed refusal (the thing these tests exist to rule out inside the sandbox).
+# ``confinement`` is the platform's own evidence that the child is confined: its
+# mount namespace on Linux, and the kernel's ``sandbox_check`` answer on macOS
+# (non-zero for a process running under a Seatbelt profile).
 _CHILD = r"""
 import json, os, sys, urllib.request
 
@@ -80,9 +87,19 @@ def proof():
     except Exception as exc:  # harness/transport error -- distinct from a refusal
         return {"outcome": "error", "detail": "%s: %s" % (type(exc).__name__, exc)}
 
+def confinement():
+    if sys.platform == "darwin":
+        import ctypes
+        libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        check = libsystem.sandbox_check
+        check.restype = ctypes.c_int
+        check.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        return {"sandbox_check": check(os.getpid(), None, 0)}
+    return {"mnt_ns": os.readlink("/proc/self/ns/mnt")}
+
 report = {
-    "mnt_ns": os.readlink("/proc/self/ns/mnt"),
     "marker": os.environ.get("KIROCREW_SANDBOX_ACTIVE"),
+    "confinement": confinement(),
     "proof": proof(),
 }
 print("REPORT " + json.dumps(report), flush=True)
@@ -92,9 +109,9 @@ print("REPORT " + json.dumps(report), flush=True)
 class _UnixHTTPGateway:
     """A minimal HTTP/1.1 responder on the dashboard AF_UNIX socket.
 
-    The parent process owns it, so ``SO_PEERCRED`` on the child's connection reports
-    THIS process -- the same pid ``write_marker`` recorded -- which is what lets the
-    real proof reach ``MATCH`` without any peercred monkeypatch.
+    The parent process owns it, so the peer credentials on the child's connection
+    report THIS process -- the same pid ``write_marker`` recorded -- which is what
+    lets the real proof reach ``MATCH`` without any peer-credential monkeypatch.
     """
 
     def __init__(self, sock_path: Path) -> None:
@@ -144,13 +161,13 @@ class _UnixHTTPGateway:
 
 @pytest.fixture
 def gateway(tmp_path, monkeypatch):
-    # A SHORT data home: the AF_UNIX path has a ~108-byte kernel limit, and a pytest
-    # tmp_path is long, so bind the socket under a short /tmp home both the parent and
-    # the in-sandbox child resolve identically from KIROCREW_HOME. mkdtemp under the
-    # suite's short run-root (``short_tmp_base`` / ``SHORT_TMP_PREFIX``) keeps the
-    # dashboard AF_UNIX socket path under its ~108-byte kernel limit even when the
-    # per-test temp-isolation diagnostic redirects tempfile into a long node-id dir,
-    # and the finally's rmtree keeps it inside this fixture's own cleanup contract.
+    # A SHORT data home: the AF_UNIX path has a small kernel limit (``_SUN_PATH_MAX``)
+    # and a pytest tmp_path is long, so bind the socket under a short home that both
+    # the parent and the sandboxed child resolve identically from KIROCREW_HOME.
+    # mkdtemp under the suite's short run-root (``short_tmp_base`` /
+    # ``SHORT_TMP_PREFIX``) keeps the path short even when the per-test
+    # temp-isolation diagnostic redirects tempfile into a long node-id dir, and the
+    # finally's rmtree keeps it inside this fixture's own cleanup contract.
     short = Path(tempfile.mkdtemp(prefix=SHORT_TMP_PREFIX, dir=short_tmp_base()))
     monkeypatch.setenv("KIROCREW_HOME", str(short))
     monkeypatch.setenv("KIROCREW_ASSUME_GATEWAY_RUNNING", "0")
@@ -161,7 +178,7 @@ def gateway(tmp_path, monkeypatch):
     sock_path.parent.mkdir(parents=True, exist_ok=True)
     if sock_path.exists():
         sock_path.unlink()
-    assert len(str(sock_path)) < 108, f"AF_UNIX path too long: {sock_path}"
+    assert len(str(sock_path)) < _SUN_PATH_MAX, f"AF_UNIX path too long: {sock_path}"
     server = _UnixHTTPGateway(sock_path)
     server.start()
     try:
@@ -172,11 +189,14 @@ def gateway(tmp_path, monkeypatch):
         shutil.rmtree(short, ignore_errors=True)
 
 
-def _run_child() -> dict:
-    argv = [sys.executable, "-c", _CHILD, str(_PORT)]
+def _child_argv() -> list[str]:
+    return [sys.executable, "-c", _CHILD, str(_PORT)]
+
+
+def _run(wrapped: list[str]) -> tuple[dict, str]:
     env = {k: v for k, v in os.environ.items() if k != "KIROCREW_SANDBOX_ACTIVE"}
     proc = subprocess.run(
-        sandbox.namespace_argv(argv, "standard"),
+        wrapped,
         env=env,
         capture_output=True,
         text=True,
@@ -187,18 +207,52 @@ def _run_child() -> dict:
     assert proc.returncode == 0, output
     (line,) = [ln for ln in proc.stdout.splitlines() if ln.startswith("REPORT ")]
     report = json.loads(line[len("REPORT ") :])
-    # It really ran confined: the launcher marked it, in a mount namespace of its own.
+    # The launcher marked the child as running confined.
     assert report["marker"] == "1", output
-    assert report["mnt_ns"] != os.readlink("/proc/self/ns/mnt"), output
-    return report
+    return report, output
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="the namespace launcher is Linux-only")
+@pytest.mark.skipif(
+    not userns_available(),
+    reason="this host cannot build the namespace sandbox (no unprivileged user and mount "
+    "namespaces); the namespace-sandbox CI job provides them and asserts userns_available()",
+)
 def test_sage_peer_proof_reaches_match_inside_the_sandbox(gateway):
-    """The real proof, run from inside the standard sandbox, reaches a live MATCH.
+    """The real proof, run from inside the standard namespace sandbox, reaches MATCH.
 
     A ``refused`` outcome here would mean the mount-ns seal masked the gateway
     pidfile, the dashboard socket, or ``/proc/<peer-pid>``, so the Sage backend
     could not prove its own gateway and every review spawn/publish would break.
     """
-    report = _run_child()
+    report, output = _run(sandbox.namespace_argv(_child_argv(), "standard"))
+    # It ran in a mount namespace of its own.
+    assert report["confinement"]["mnt_ns"] != os.readlink("/proc/self/ns/mnt"), output
+    assert report["proof"]["outcome"] == "match", report["proof"]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Seatbelt is macOS-only")
+@pytest.mark.skipif(
+    not os.path.exists(_SANDBOX_EXEC),
+    reason=f"{_SANDBOX_EXEC} is absent on this host, so no Seatbelt profile can be applied",
+)
+def test_sage_peer_proof_reaches_match_inside_seatbelt(gateway):
+    """The real proof, run from inside the standard Seatbelt profile, reaches MATCH.
+
+    The child is wrapped by ``wrap_argv(mode="standard")``, the call the Sage backend
+    launch uses. A ``refused`` outcome here would mean the profile denied the gateway
+    pidfile, its ``.start`` sidecar or the dashboard socket, so the Sage backend could
+    not prove its own gateway and every review spawn/publish would break on macOS.
+    """
+    wrapped, cleanup = sandbox.wrap_argv(_child_argv(), mode="standard")
+    try:
+        # The wrap really applied Seatbelt: a no-op wrap would run the child on the
+        # host's own view and could reach MATCH without proving anything.
+        assert any(os.path.basename(a) == "sandbox-exec" for a in wrapped), wrapped
+        report, output = _run(wrapped)
+    finally:
+        if cleanup:
+            Path(cleanup).unlink(missing_ok=True)
+    # The kernel reports the child as running under a sandbox profile.
+    assert report["confinement"]["sandbox_check"] != 0, output
     assert report["proof"]["outcome"] == "match", report["proof"]
