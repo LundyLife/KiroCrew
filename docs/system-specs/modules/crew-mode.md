@@ -1265,12 +1265,8 @@ Loading, a failed roster read and a genuinely empty roster remain distinct. The
 page's copy says mate / Mates and "Built from"; the crew record, its API
 and its identifiers are unchanged.
 
-With the Mates preview off, Mate still exists in the background, but every list
-that offers crew records leaves it out (`hideMateWithoutPreview` in
-`lib/assistantMember.ts`: the agent pickers fed by `useAgents`, Customize and a
-template's crew list), so nothing names it until the preview is on. With the
-preview on, Customize > Crewmates lists it as a card like any other crewmate:
-its row carries `member_id: "mate"`, so it is not a legacy binding
+Customize > Crewmates lists Mate as a card like any other crewmate: its row
+carries `member_id: "mate"`, so it is not a legacy binding
 (`mate_worker.is_legacy_binding`) and the pickers list it unchatted.
 
 Mate's chat has no static welcome card. Mate speaks first instead: once the thread
@@ -4417,6 +4413,4 @@ its own standing thread. What remains, and why:
   left in place rather than re-litigating a security boundary in a removal PR.
 
 The sidebar's create menu no longer carries the entry that used to create a
-crew-mode session: `/members` is reached from its rail item while `PREVIEW_CREW`
-(Settings → Developer → Feature Previews) is on, and by turning that card on
-while it is off.
+crew-mode session: `/members` is reached from its rail item.
