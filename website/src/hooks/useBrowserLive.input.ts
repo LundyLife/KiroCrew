@@ -32,6 +32,10 @@ export interface BrowserInputEvent {
   text?: string
   /** CDP modifier bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8. */
   modifiers?: number
+  /** Width of the frame `x`/`y` were mapped against. Frames differ in width
+   *  (each quality rung, the sharp still), so the gateway scales by THIS frame,
+   *  not by whichever frame it captured last. */
+  w?: number
 }
 
 export interface Box { left: number; top: number; width: number; height: number }
@@ -130,6 +134,7 @@ export function pointerToEvent(action: 'down' | 'up' | 'move', e: PointerLike, b
     button: action === 'move' ? heldButton(e.buttons) : buttonName(e.button),
     clicks: action === 'move' ? 0 : Math.max(1, Math.min(3, clicks)),
     modifiers: modifiersOf(e),
+    w: frame.w,
   }
 }
 
@@ -157,6 +162,7 @@ export function wheelToEvent(e: WheelLike, box: Box, frame: FrameSize): BrowserI
     dx: Math.round(e.deltaX * unit),
     dy: Math.round(e.deltaY * unit),
     modifiers: modifiersOf(e),
+    w: frame.w,
   }
 }
 

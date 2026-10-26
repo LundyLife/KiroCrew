@@ -289,6 +289,22 @@ def test_frame_pixels_are_divided_by_the_stream_scale_before_cdp() -> None:
     assert (p0["x"], p0["y"]) == (100.0, 50.0)
 
 
+def test_the_card_frame_width_is_bounded_and_sets_the_scale() -> None:
+    """``w`` is the width of the frame the card mapped against (RM-1)."""
+    ev = tk.parse_input_event({"type": "mouse", "x": 1, "y": 1, "button": "left", "w": 640})
+    assert ev.frame_w == 640
+    assert tk.frame_scale(ev, 1280.0, 1.0) == 0.5
+    wheel = tk.parse_input_event({"type": "wheel", "x": 1, "y": 1, "dy": 1, "w": 960})
+    assert tk.frame_scale(wheel, 1280.0, 1.0) == 0.75
+    # No width, or no viewport width yet: the stream's own ratio.
+    bare = tk.parse_input_event({"type": "mouse", "x": 1, "y": 1, "button": "left"})
+    assert bare.frame_w == 0 and tk.frame_scale(bare, 1280.0, 0.625) == 0.625
+    assert tk.frame_scale(ev, 0.0, 0.625) == 0.625
+    for bad in (-1, tk.MAX_COORD + 1, "640", True):
+        with pytest.raises(tk.InputEventError):
+            tk.parse_input_event({"type": "mouse", "x": 1, "y": 1, "button": "left", "w": bad})
+
+
 @pytest.mark.asyncio
 async def test_dispatch_passes_the_scale_through() -> None:
     relay = FakeRelay()

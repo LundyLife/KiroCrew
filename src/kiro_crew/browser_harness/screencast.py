@@ -716,6 +716,10 @@ class LiveStream:
         self.stream_id = secrets.token_hex(4)
         #: Frame pixels per viewport CSS pixel of the last frame (1.0 until one lands).
         self.scale = 1.0
+        #: The viewport's CSS width from the last frame's metadata (0 until one
+        #: lands): takeover input scales by the width of the frame the CARD drew
+        #: against this (``takeover.frame_scale``), not by :attr:`scale`.
+        self.device_width = 0.0
         self.metrics = _Metrics()
         self.running = False
         self.visible = True
@@ -1067,6 +1071,7 @@ class LiveStream:
             device_w = 0.0
         if device_w > 0 and width > 0:
             self.scale = width / device_w
+            self.device_width = device_w
 
     async def _wait_card_ack(self, waiter: asyncio.Event) -> bool:
         """Wait for the card's ack, bounded by :data:`CARD_ACK_TIMEOUT_S` on the injected sleep."""

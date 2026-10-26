@@ -196,6 +196,37 @@ async def test_claim_takes_control_caps_the_stream_and_release_hands_back(hub) -
     assert wire.events[-1][1]["state"] == "live"
 
 
+async def test_input_is_scaled_by_the_frame_the_card_drew_not_the_newest(hub) -> None:
+    """RM-1: over a slow link the screencast mixes picture widths (a 640 px rung, the
+    1280 px settle still), and frames the card never drew still move the stream's
+    scale. The card drew a 1280 px frame of a 1280 CSS px viewport and clicked at
+    (404, 424); the stream's newest frame was 640 px (scale 0.5). Scaling by the
+    stream put the click at (808, 848), off the field and below the page."""
+    h, _wire = hub
+    relay = FakeRelay()
+    stream = await h.start_stream(
+        "chat-1", relay, "a", browser="kiro_chromium", headless=True, stream_factory=FakeStream
+    )
+    stream.scale, stream.device_width = 0.5, 1280.0
+    await h.claim("chat-1")
+    click = {"type": "mouse", "action": "down", "x": 404, "y": 424, "button": "left"}
+    await h.input_event("chat-1", {**click, "w": 1280})
+    assert (relay.calls[-1][1]["x"], relay.calls[-1][1]["y"]) == (404, 424)
+    # The same point on the 640 px frame the card may draw next is the same CSS point.
+    await h.input_event("chat-1", {**click, "x": 202, "y": 212, "w": 640})
+    assert (relay.calls[-1][1]["x"], relay.calls[-1][1]["y"]) == (404, 424)
+    # A wheel is scaled the same way.
+    await h.input_event("chat-1", {"type": "wheel", "x": 404, "y": 424, "dy": 100, "w": 1280})
+    assert relay.calls[-1][1]["deltaY"] == 100
+    # A card that sends no width keeps the stream's own ratio (the old behaviour).
+    await h.input_event("chat-1", click)
+    assert relay.calls[-1][1]["x"] == 808
+    # Before any frame metadata (device_width 0) the width cannot be used.
+    stream.device_width = 0.0
+    await h.input_event("chat-1", {**click, "w": 1280})
+    assert relay.calls[-1][1]["x"] == 808
+
+
 async def test_input_is_refused_without_a_claim_or_without_a_stream(hub) -> None:
     h, _wire = hub
     with pytest.raises(LookupError, match="not_in_control"):

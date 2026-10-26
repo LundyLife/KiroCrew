@@ -51,7 +51,13 @@ describe('pointerToEvent', () => {
   const box = { left: 0, top: 0, width: 640, height: 400 }
   it('maps a left down with a click count', () => {
     expect(pointerToEvent('down', { ...noMods, clientX: 320, clientY: 200, button: 0 }, box, frame, 2))
-      .toEqual({ type: 'mouse', action: 'down', x: 640, y: 400, button: 'left', clicks: 2, modifiers: 0 })
+      .toEqual({ type: 'mouse', action: 'down', x: 640, y: 400, button: 'left', clicks: 2, modifiers: 0, w: 1280 })
+  })
+  it('carries the width of the frame it mapped against, so the gateway scales by THAT frame', () => {
+    // RM-1: the stream mixes frame widths; the gateway's newest frame may be another one.
+    const small = { w: 640, h: 400 }
+    expect(pointerToEvent('down', { ...noMods, clientX: 320, clientY: 200, button: 0 }, box, small))
+      .toMatchObject({ x: 320, y: 200, w: 640 })
   })
   it('names the right and middle buttons', () => {
     expect(pointerToEvent('up', { ...noMods, clientX: 0, clientY: 0, button: 2 }, box, frame)!.button).toBe('right')
@@ -90,7 +96,7 @@ describe('wheelToEvent', () => {
   const box = { left: 0, top: 0, width: 640, height: 400 }
   it('passes pixel deltas through, rounded', () => {
     expect(wheelToEvent({ ...noMods, clientX: 320, clientY: 200, deltaX: 0, deltaY: 53.4, deltaMode: 0 }, box, frame))
-      .toEqual({ type: 'wheel', x: 640, y: 400, dx: 0, dy: 53, modifiers: 0 })
+      .toEqual({ type: 'wheel', x: 640, y: 400, dx: 0, dy: 53, modifiers: 0, w: 1280 })
   })
   it('scales line and page deltas to pixels', () => {
     expect(wheelToEvent({ ...noMods, clientX: 0, clientY: 0, deltaX: 0, deltaY: 3, deltaMode: 1 }, box, frame)!.dy).toBe(48)

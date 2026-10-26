@@ -188,6 +188,25 @@ class InputEvent:
     code: str = ""
     text: str = ""
     modifiers: int = 0
+    #: Width of the frame the card measured ``x``/``y`` in (``w`` on the wire), or 0
+    #: when the card did not say. See :func:`frame_scale`.
+    frame_w: int = 0
+
+
+def frame_scale(event: InputEvent, device_width: float, fallback: float) -> float:
+    """Frame-pixels-per-CSS-pixel for *event*: from the frame the card showed.
+
+    The screencast's pictures differ in width (the ladder's rungs, the sharp
+    settle still), so the stream's latest scale can belong to a frame the card
+    never drew: a click mapped against a 1280 px frame and divided by a 640 px
+    frame's scale lands twice as far down and right, off the field or off the
+    page. The card sends the width it mapped against; with the viewport's CSS
+    width that gives the exact ratio. *fallback* (the stream's own) is for a
+    card that sends no width.
+    """
+    if event.frame_w > 0 and device_width > 0:
+        return event.frame_w / device_width
+    return fallback
 
 
 def _int_field(event: dict[str, Any], name: str, *, lo: int, hi: int, default: int = 0) -> int:
@@ -231,6 +250,7 @@ def parse_input_event(raw: Any) -> InputEvent:
         )
     x = _int_field(raw, "x", lo=0, hi=MAX_COORD)
     y = _int_field(raw, "y", lo=0, hi=MAX_COORD)
+    frame_w = _int_field(raw, "w", lo=0, hi=MAX_COORD)
     if kind == "wheel":
         return InputEvent(
             type="wheel",
@@ -240,6 +260,7 @@ def parse_input_event(raw: Any) -> InputEvent:
             dx=_int_field(raw, "dx", lo=-MAX_DELTA, hi=MAX_DELTA),
             dy=_int_field(raw, "dy", lo=-MAX_DELTA, hi=MAX_DELTA),
             modifiers=modifiers,
+            frame_w=frame_w,
         )
     button = raw.get("button", "none") or "none"
     if button not in _BUTTONS:
@@ -264,6 +285,7 @@ def parse_input_event(raw: Any) -> InputEvent:
         button=str(button),
         clicks=clicks,
         modifiers=modifiers,
+        frame_w=frame_w,
     )
 
 

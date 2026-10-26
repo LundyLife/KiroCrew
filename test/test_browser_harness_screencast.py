@@ -529,6 +529,8 @@ async def test_each_frame_carries_the_stream_id_and_the_scale_follows_the_rung()
     assert stream.scale == 1.0
     await relay.on_event(frame_event(make_jpeg(800, 480), device_w=1280))
     assert stream.scale == pytest.approx(0.625)
+    # The viewport's CSS width, which takeover input divides the card's own frame by.
+    assert stream.device_width == 1280.0
     assert {h["stream"] for h, _ in sink.frames} == {stream.stream_id}
     other, _r, _c, _s = make_stream()
     assert other.stream_id != stream.stream_id

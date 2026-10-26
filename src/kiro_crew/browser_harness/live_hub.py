@@ -37,6 +37,7 @@ from kiro_crew.browser_harness.takeover import (
     InputLock,
     dispatch_input,
     focused_field,
+    frame_scale,
     parse_input_event,
 )
 
@@ -988,18 +989,23 @@ class LiveHub:
         stream = sess.stream
         if stream is None or not stream.session_id:
             raise LookupError("no_stream")
-        scale = float(getattr(stream, "scale", 1.0) or 1.0)
-        if sess.input_rect is not None and not _inside_scope(
-            parse_input_event(event), sess.input_rect, scale
-        ):
+        parsed = parse_input_event(event)
+        # The ratio of the frame the card drew, not of the stream's newest frame
+        # (see ``takeover.frame_scale``).
+        scale = frame_scale(
+            parsed,
+            float(getattr(stream, "device_width", 0.0) or 0.0),
+            float(getattr(stream, "scale", 1.0) or 1.0),
+        )
+        if sess.input_rect is not None and not _inside_scope(parsed, sess.input_rect, scale):
             # A scoped takeover (a human_check): only the widget's box takes input.
             return 0
         sent = await dispatch_input(stream.relay, stream.session_id, event, scale=scale)
         stream.note_input()
         if self.recorder is not None:
-            # Validated already (dispatch_input raised otherwise). The recorder keeps
+            # Validated already (parse_input_event raised otherwise). The recorder keeps
             # no typed text: keystrokes count as characters, never as what was typed.
-            self.recorder.user_input(session_key, parse_input_event(event), sess.url)
+            self.recorder.user_input(session_key, parsed, sess.url)
         return sent
 
     async def focused_field(self, session_key: str) -> dict[str, Any]:

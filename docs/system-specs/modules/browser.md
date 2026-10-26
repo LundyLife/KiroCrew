@@ -446,16 +446,22 @@ an agent cannot claim input for itself, and validates that the caller owns the
 session. While claimed, mouse, wheel and key events from the card go to
 `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent` on the relay's input
 session; keystrokes are never logged and never enter the transcript. The event
-body is `{type: mouse|wheel|key, action: down|up|move, x, y, button, clicks, dx,
+body is `{type: mouse|wheel|key, action: down|up|move, x, y, w, button, clicks, dx,
 dy, key, code, text, modifiers}` in frame pixels (`action` is what lets the card
 drag and hold keys; without it a mouse event with a `button` is a click and one
 without is a move; a move carries `clicks: 0` and the held button, so a drag
 stays a drag), every field bounded before it is sent (`InputEventError`
 `invalid_input_event` otherwise). CDP takes viewport CSS pixels and the JPEG is
-narrower than the viewport whenever the picture is below the top one, so the
-stream keeps `frame width /
-deviceWidth` from each frame's metadata and positions and wheel deltas are
-divided by it at the one place the event becomes CDP. A hand back the gateway
+narrower than the viewport whenever the picture is below the top one, so
+positions and wheel deltas are divided by `frame width / deviceWidth` at the one
+place the event becomes CDP. The frame width is the card's: a pointer or wheel
+event carries `w`, the width of the frame the card drew and mapped against
+(`takeover.frame_scale`). Consecutive frames differ in width (a lower rung, then
+the sharp settle still, and frames the card never drew at all), so the stream's
+own latest `frame width / deviceWidth` can belong to another frame: over a slow
+link that put a click on a 1280-wide frame at twice its place, off the field or
+off the page, while every request answered 200. The stream's latest ratio is
+only the fallback for an event without `w`. A hand back the gateway
 refuses puts the card back in control with the gateway's text in an inline
 `ErrorNotice`; the lock is still held, and Hand back is the retry. A take over the
 gateway refuses leaves the card live with the same notice, and Take over is the
