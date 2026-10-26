@@ -56,13 +56,6 @@ export function useCrewWorkerSummary(root: string): {
   return { workers: query.isError ? undefined : query.data?.workers, failed: query.isError, savedTitle, lastWorkers: query.data?.workers }
 }
 
-/** Whether `key` is a done worker on `root`'s worker list: the server's group,
- *  read from the same query the panel and breadcrumb share. */
-export function useCrewWorkerIsDone(root: string, key: string): boolean {
-  const { workers } = useCrewWorkerSummary(root)
-  return !!workers?.some(w => w.key === key && w.group === 'done')
-}
-
 /** Open one of a root's sessions -- a worker, or the root itself -- in the main
  *  pane, with the Workers tab in front in its side panel so switching is one click.
  *  A plain `switchSlot`, like a tab click: the composer keeps each session's draft,

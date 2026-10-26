@@ -1,8 +1,7 @@
 /* ── Crew Mode surfaces ──
    One gradient ties every Crew Mode surface together: the session list root
    row's ghost badge and "CREW MODE" eyebrow (the row itself stays a plain
-   session row), the filter chip, the composer's Crew Mode chip
-   and the steer composer's ring. It runs from the theme's own `--aim` (the
+   session row), the filter chip and the composer's Crew Mode chip. It runs from the theme's own `--aim` (the
    crew's purple) to `--info` (its blue), so a theme that moves either token
    moves Crew Mode with it, light and dark alike. Nothing here covers other UI:
    each rule colours the element it is set on. Cards and chips wear a fill and
@@ -91,50 +90,6 @@ html:root .liquid-glass.crew-chip:not(:disabled):not([aria-disabled="true"]):act
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
-
-/* The steer composer: the composer in a worker view, ringed in the crew's purple. */
-.crew-steer-ring {
-  border-radius: var(--radius-lg, 12px);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aim) 70%, transparent),
-    0 0 16px -4px color-mix(in srgb, var(--aim) 50%, transparent);
-}
-
-/* One frame for the steer composer: the ring IS the composer's card, so the
-   composer's own glass card inside it gives up its surface, edge and shadow.
-   Scoped to the composer card the dock draws (`liquid-glass glass-thin
-   glass-shadow`); menus the composer opens are portalled out of this box. */
-.crew-steer-ring {
-  background-color: var(--bg-elevated);
-}
-
-.crew-steer-ring .liquid-glass.glass-thin.glass-shadow {
-  background: transparent;
-  box-shadow: none;
-  border-color: transparent;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
-.crew-steer-ring .liquid-glass.glass-thin.glass-shadow::before,
-.crew-steer-ring .liquid-glass.glass-thin.glass-shadow::after,
-.crew-steer-ring .glass-shelf::before {
-  display: none;
-}
-
-/* A solid (non-glass) pane wears a 1px `--border` outline marked `!important`
-   (liquid-glass.css); inside the ring that outline is the second frame. The
-   keyboard ring (`:focus-visible`) is left alone. */
-.crew-steer-ring .liquid-glass.glass-thin.glass-shadow:not(:focus-visible) {
-  outline: none !important;
-}
-
-/* A phone's steer input is 16px, so iOS does not zoom the page into it. */
-@media (max-width: 767px) {
-  .crew-steer-ring [contenteditable="true"],
-  .crew-steer-ring textarea {
-    font-size: 16px;
-  }
 }
 
 /* Status text on a card or row: the state's hue mixed toward the theme's strongest

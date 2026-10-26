@@ -195,18 +195,37 @@ describe('Crew Mode on ChatPage', () => {
     expect(screen.getByTestId('crew-mode-composer-chip')).toHaveTextContent('Crew Mode')
   })
 
-  it('opens a worker like a session: breadcrumb, back to conductor, and a steer composer', async () => {
+  it('opens a worker like a session: breadcrumb and Back to Crew Mode', async () => {
     const store = await renderWith({ messages: [{ role: 'user', content: 'do part 2' }], agent: 'kirocrew-worker', agentKind: 'template', createdBy: 'root-1', crewRoot: 'root-1', slotKeys: ['slot-a', 'root-1'] })
     const crumb = screen.getByTestId('crew-worker-breadcrumb')
     expect(crumb).toHaveTextContent('Sample goal')
     expect(crumb).toHaveTextContent('Worker B')
     expect(screen.getByTestId('crew-steer-composer')).toBeInTheDocument()
-    expect(screen.getByTestId('crew-steer-label')).toHaveTextContent('Steer · Worker B')
-    // An idle worker: a send starts a new turn, it does not cut into a reply.
-    expect(screen.getByTestId('crew-steer-hint')).toHaveTextContent('Starts a new turn in Worker B.')
-    expect(screen.getByTestId('crew-steer-hint')).toHaveAttribute('data-running', 'false')
-    fireEvent.click(screen.getByTestId('crew-back-to-conductor'))
+    // Owner ruling: the button names Crew Mode, and its accessible name says the same.
+    const back = screen.getByRole('button', { name: 'Back to Crew Mode' })
+    expect(back).toHaveTextContent('Back to Crew Mode')
+    expect(screen.queryByText(/Back to conductor/)).toBeNull()
+    fireEvent.click(back)
     await waitFor(() => expect(store.getState().chat.activeSlot).toBe('root-1'))
+  })
+
+  it("a worker's composer is the conductor's normal composer: no frame, header, hint or agent label", async () => {
+    await renderWith({ messages: [{ role: 'user', content: 'do part 2' }], agent: 'kirocrew-worker', agentKind: 'template', createdBy: 'root-1', crewRoot: 'root-1', slotKeys: ['slot-a', 'root-1'] })
+    const wrap = screen.getByTestId('crew-steer-composer')
+    expect(wrap.className).toBe('')
+    expect(document.querySelector('.crew-steer-ring')).toBeNull()
+    expect(screen.queryByText(/^Steer · /)).toBeNull()
+    expect(screen.queryByText(/Starts a new turn in|Cuts into its current reply/)).toBeNull()
+    // The normal placeholder (this fixture's interrupted turn shows the normal
+    // composer's Resume line), never one that names the worker.
+    const ph = within(wrap).getByRole('textbox').getAttribute('placeholder') ?? ''
+    expect(ph).not.toMatch(/^Steer|Worker B/)
+    expect(ph).toMatch(/^Message |press Resume/)
+    // The conductor's footer: the Crew Mode mark, never a switch, and no agent picker.
+    const mark = within(wrap).getByTestId('crew-mode-composer-chip')
+    expect(mark.tagName).not.toBe('BUTTON')
+    expect(within(wrap).queryByRole('button', { name: /^Agent: / })).toBeNull()
+    expect(within(wrap).queryByText('kirocrew-worker')).toBeNull()
   })
 
   it('V1: a worker opened from Workers while Split View is on leaves the split and shows the worker', async () => {
@@ -225,19 +244,12 @@ describe('Crew Mode on ChatPage', () => {
     dashboardConfig.mockResolvedValue({})
   })
 
-  it("a running worker's steer hint says a send cuts into its current reply", async () => {
+  it("a running worker's composer keeps the normal placeholder and shows no hint", async () => {
     detail.running = true
     await renderWith({ messages: [{ role: 'user', content: 'do part 2' }], agent: 'kirocrew-worker', agentKind: 'template', createdBy: 'root-1', crewRoot: 'root-1', slotKeys: ['slot-a', 'root-1'], listedRunning: true })
-    await waitFor(() => expect(screen.getByTestId('crew-steer-hint')).toHaveTextContent('Cuts into its current reply.'))
-    expect(screen.getByTestId('crew-steer-hint')).toHaveAttribute('data-running', 'true')
-  })
-
-  it("a done worker's steer hint says a send starts a new turn, even with a stale turn flag", async () => {
-    crewWorkers.mockResolvedValue({ workers: [{ key: 'slot-a', title: 'Worker B', agent: 'kirocrew-worker', status: 'working', group: 'done', last_activity: '', ledger_item: '', created_by: 'root-1' }] })
-    detail.running = true
-    await renderWith({ messages: [{ role: 'user', content: 'do part 2' }], agent: 'kirocrew-worker', agentKind: 'template', createdBy: 'root-1', crewRoot: 'root-1', slotKeys: ['slot-a', 'root-1'], listedRunning: true })
-    await waitFor(() => expect(screen.getByTestId('crew-steer-hint')).toHaveTextContent('Starts a new turn in Worker B.'))
-    expect(screen.getByTestId('crew-steer-hint')).toHaveAttribute('data-running', 'false')
+    const box = within(screen.getByTestId('crew-steer-composer')).getByRole('textbox')
+    await waitFor(() => expect(box.getAttribute('placeholder') ?? '').toMatch(/^Message /))
+    expect(screen.queryByText(/Cuts into its current reply|Starts a new turn in/)).toBeNull()
   })
 
   // ── edge review R2: Y1 / X2, Y2 / X5, Y3 ────────────────────────────────────
@@ -266,14 +278,19 @@ describe('Crew Mode on ChatPage', () => {
     const gate = await screen.findByTestId('crew-worker-root-closed')
     expect(gate).toHaveTextContent('to keep working')
     expect(screen.getByTestId('crew-worker-reopen-root')).toHaveTextContent('Reopen')
+    // The breadcrumb's button names Crew Mode too, in its text and accessible name.
+    const crumbReopen = screen.getByTestId('crew-back-to-conductor')
+    expect(crumbReopen).toHaveAccessibleName('Reopen Crew Mode')
+    expect(crumbReopen).toHaveTextContent('Reopen Crew Mode')
+    expect(screen.queryByText(/Reopen conductor/)).toBeNull()
     const box = within(screen.getByTestId('crew-steer-composer')).getByRole('textbox')
     expect(box).toHaveAttribute('aria-disabled', 'true')
     expect(box).toHaveAttribute('readonly')
     // R5 V2: the reopen sentence is said once, not again in the header or the box.
     expect(screen.getAllByText(/to keep working|Reopen it to keep steering/)).toHaveLength(1)
     expect(box.getAttribute('placeholder') ?? '').toBe('')
-    // R4 H4: only the reopen line, no 'Starts a new turn' hint.
-    expect(screen.queryByTestId('crew-steer-hint')).toBeNull()
+    // R4 H4: only the reopen line, no hint under the box.
+    expect(screen.queryByText(/Starts a new turn in|Cuts into its current reply/)).toBeNull()
   })
 
   it('Y3: a reload under a closed conductor keeps its saved name and the real worker state', async () => {

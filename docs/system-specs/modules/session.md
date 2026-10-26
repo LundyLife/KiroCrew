@@ -566,16 +566,17 @@ tokens, rows older than the loaded window, and closed workers whose saved
 transcript can no longer be read (named only when such a lane is shown). A lane
 keeps its newest 400 bars and counts the rest in `dropped_segments`.
 
-The dashboard draws this as design B. A Crew Mode root's session-list row is the
-crew card (`styles/crew-mode.css` `.crew-card`, a tint and glow from `--aim` to
-`--info`): a solid ghost badge, a gradient "Crew Mode" eyebrow in place of the
-agent name, the title and time, and a stack of tiny worker ghosts coloured by
+The dashboard draws this as design B. A Crew Mode root's session-list row is a
+normal session row (no fill, border or frame; hover and selected as any row): a
+solid ghost badge, a gradient "Crew Mode" eyebrow in place of the agent name
+(`.crew-eyebrow-text`, each stop pulled 30% toward the strongest text colour for
+4.5:1 on every row state), the title and time, and a stack of tiny worker ghosts coloured by
 group with "Approval needed · N" (tool approvals only) or "Done x/y" (`summarizeCrewWorkers` over the worker
 list API, the same groups the panel and the breadcrumb show; a live slot row alone
 never says done). That summary IS the row's one status line: the row's own states
 (running, an owed approval, and the rest of the resolver) outrank it, and it stands
 where the last message would, which shows instead until the worker list answers,
-so a crew card is as tall as any row. A failed worker-list read says so on that
+so a Crew Mode row is as tall as any row. A failed worker-list read says so on that
 line (an inline `ErrorNotice` with the agent hand-off) instead of older counts. It stays in the time-sorted list. The filter menu's
 Crew Mode item is a gradient chip when on, and one line under the filters says
 workers and their folders stay out of the list. The side panel gets a **Workers**
@@ -619,8 +620,9 @@ panel (`closeActivityPanel`), so the sheet never covers the chat it opened. A wo
 (`CREW_WORKER_ROOMY_PX`) hides the sessions list the way preview expand does,
 and leaving the worker restores it; a person's own toggle wins and only that
 toggle is stored. In the breadcrumb only the root title takes the ellipsis.
-The steer composer is one frame: the ring is the composer's card and the
-composer's glass card inside gives up its surface. A message another session
+The steer composer is the conductor's normal composer: no ring, header or
+hint, the normal placeholder, and the conductor's footer (the read-only Crew
+Mode mark and the workspace, no agent picker). A message another session
 delivered drops its `[sent by session <key> via session_send]` line in the
 bubble and the pinned card (`lib/crewSeed.ts`) and is labelled by role: "From
 conductor" when the worker's root sent it, "From a worker" for another worker
@@ -684,19 +686,16 @@ as that markdown under its title rather than as raw text in the frame. A card op
 worker in the MAIN pane like any session with the Workers tab in front of its
 panel; on a phone the panel sheet closes. The worker view's header is a
 breadcrumb (`CrewWorkerBreadcrumb`: ghost, root title, worker, status) with
-"Back to conductor" (with the root's tab closed: its saved title and the worker's
+"Back to Crew Mode" (with the root's tab closed: its saved title and the worker's
 real group, both read from saved data by the worker list, which answers a closed
 root with `root_closed: true` and `root_title`; a line saying the conductor is
-closed; and "Reopen conductor", which reopens it from its saved transcript). With
+closed; and "Reopen Crew Mode", which reopens it from its saved transcript). With
 the root closed the worker's composer is off and says "Reopen <conductor> to keep
 working" with a Reopen button, and `POST /api/chat` refuses a person's send to that
 worker (`409 crew_root_closed`) before anything is queued, the same live-root
 admission as the steer route. Its composer is otherwise the
-steer composer: ringed in the crew
-purple, labelled "Steer · <worker>", a hint chosen from the worker's state
-("Cuts into its current reply." while a turn runs, "Starts a new turn in <worker>."
-when it is idle, or done on the worker list even if a turn flag is stale), and `busyMode="steer-only"` so a running turn takes the
-text as a steer. `POST /api/chat/slots/{slot}/crew-workers/{worker}/steer`
+steer composer: it looks like the conductor's normal composer, and
+`busyMode="steer-only"` makes a running turn take the text as a steer. `POST /api/chat/slots/{slot}/crew-workers/{worker}/steer`
 types `{message}` into one of them as the person: it cuts into a running turn
 (`steer_into_running_turn`, `user_origin=True`) or queues for the next one and
 starts an idle worker (`queue_for_next_turn`, `directive_user_origin=True`, which

@@ -1,7 +1,7 @@
 import type { NavigateFunction } from 'react-router-dom'
 import { useId, useState, type RefObject, type Dispatch, type SetStateAction, type MutableRefObject } from 'react'
 import { OverlayPortal } from '../../../components/overlayRoot'
-import { Send, Undo2 } from 'lucide-react'
+import { Undo2 } from 'lucide-react'
 import { CrewModeComposerChip, CrewModeMarkSource } from '../../../components/crew/CrewModeMarks'
 import { CREW_STEER_MAX_CHARS, crewApprovalDecidableHere } from '../../../lib/crewMode'
 import CrewApprovalCards from '../../../components/crew/CrewApprovalCards'
@@ -266,12 +266,9 @@ interface ComposerDockViewProps {
    *  the conductor is chosen by Crew Mode itself. Workspace and model stay. */
   agentPickerHidden?: boolean
   /** The main pane holds a Crew Mode worker: the composer is that worker's steer
-   *  composer (ringed, labelled with the worker, and a running turn takes the
-   *  text as a steer rather than queueing it). The worker's title. */
+   *  composer. It looks like the conductor's normal composer; a running turn
+   *  takes the text as a steer rather than queueing it. The worker's title. */
   steerWorker?: string
-  /** The steered worker's group on the worker list is done: its hint says a send
-   *  starts a new turn even while a turn flag is still stale. */
-  steerWorkerDone?: boolean
   /** The steered worker's Crew Mode root (its `crew_root`). Its approvals are
    *  decided on that root's card, and with the root closed the composer is off. */
   steerWorkerRoot?: string
@@ -298,15 +295,13 @@ export default function ComposerDockView({
   effortSupported, modelMarker, pinModelToAgentMut, projectBranch, projectGit, projectGitError, shownModel, cardOwnsRecovery, continuable, continuing, handleContinue, interrupted, dockGutter, dockRef,
   endQuoteFlight, flyingQuote, inputAreaRef, isAtBottom, answerQuestionCard, handleCancelQueued, handleEditQueued, handleInterruptQueued, handleReorderQueued, keepQuestionAnswer, queuedMessages,
   queuePendingIds, steer, stopTurn, systemDeliveryCount, handleEditLastRequest, composerOptimizing, handleOptimizingChange, memorySwitching, showComposerMemoryChip, switchMemoryMode, composerAbove,
-  composerSessionControls, crewModeOffered, turnOnCrewMode, turnOffCrewMode, agentPickerHidden = false, steerWorker, steerWorkerDone = false, steerWorkerRoot = '',
+  composerSessionControls, crewModeOffered, turnOnCrewMode, turnOffCrewMode, agentPickerHidden = false, steerWorker, steerWorkerRoot = '',
 }: ComposerDockViewProps) {
   const crewModeNoteId = useId()
   // Disabled while a reply runs (the agent switch refuses mid-turn): the
   // composer's own turn state, which a send sets at once, as well as the listed
   // slot's, which follows the server.
   const crewModeBusy = slotRunning || !!currentSlot?.running
-  // A done worker takes a send as a new turn, whatever a stale turn flag says.
-  const steerRunning = crewModeBusy && !steerWorkerDone
   // A Crew Mode worker's composer (edge review R2, owner decisions): its tool
   // approvals are decided only on the conductor's card, so it shows none of its
   // own; with the conductor closed it does not send until the person reopens it.
@@ -526,13 +521,10 @@ export default function ComposerDockView({
               {/* A Crew Mode conductor's workers' tool approvals, the one thing it
                   cannot answer, stacked above its composer. */}
               {currentSlot?.crew_mode_root && activeSlot && <CrewApprovalCards root={activeSlot} />}
-              <div className={steerWorker !== undefined ? 'crew-steer-ring mx-2 p-2' : undefined} data-testid={steerWorker !== undefined ? 'crew-steer-composer' : undefined}>
-              {steerWorker !== undefined && (
-                <div className="mb-1.5 px-1 flex items-center gap-1.5 text-[12px] font-semibold text-aim" data-testid="crew-steer-label">
-                  <Send size={13} aria-hidden="true" />
-                  <span className="truncate">{i18nT('components.crewMode.steer_label', { name: steerWorker })}</span>
-                </div>
-              )}
+              {/* A crew member's composer is the conductor's normal composer: no
+                  frame, header or hint. What it does differs only in delivery: a
+                  send is a person steer, and a running turn takes it as a steer. */}
+              <div data-testid={steerWorker !== undefined ? 'crew-steer-composer' : undefined}>
               {crewWorkerView && activeSlot && (
                 <CrewWorkerComposerGate root={steerWorkerRoot} worker={activeSlot} workerTitle={steerWorker ?? ''}
                   waitingForApproval={!!currentSlot?.pending_approval} />
@@ -571,11 +563,9 @@ export default function ComposerDockView({
               // A worker's approval band (Allow once / Trust / Reject) is not drawn:
               // the conductor's approval card is the one place it is decided.
               slotApprovalChrome={crewApprovalDecidableHere({ crew_root: crewWorkerView ? steerWorkerRoot : '' }, 'worker_main_pane')}
-              // A worker's steer composer: its placeholder names the worker, and a
-              // running turn takes the text as a steer (no queue choice to make).
-              // The hint under it says which of the two a send does: cut into the
-              // reply that is running, or start a new turn on an idle or done one.
-              {...(steerWorker !== undefined ? { placeholder: i18nT('components.crewMode.steer_placeholder', { name: steerWorker }), busyMode: 'steer-only' as const } : {})}
+              // A worker's composer: a running turn takes the text as a steer
+              // (no queue choice to make). The placeholder stays the normal one.
+              {...(steerWorker !== undefined ? { busyMode: 'steer-only' as const } : {})}
               autoFocusKey={activeSlot}
               prefillHint={prefillHint}
               onDismissHint={() => setPrefillHint(false)}
@@ -640,8 +630,10 @@ export default function ComposerDockView({
               // would hide every routed turn. Same `jevRouteOn` the picker's row is
               // drawn from, so chip, menu and gate cannot disagree.
               modelIsJevRouted={jevRouteOn && isUnpinnedModel(currentSlot?.model)}
-              agentBadge={agentPickerHidden ? <CrewModeComposerChip onTurnOff={turnOffCrewMode} /> : undefined}
-              onAgentClick={provider.capabilities.agentTemplates && !agentPickerHidden ? (rect, trigger) => { anchorAgentBtn(rect, trigger); setAgentDropdown(!agentDropdown) } : undefined}
+              // A crew member's footer is the conductor's: the Crew Mode mark (never
+              // a switch there) in place of the agent picker and its label.
+              agentBadge={agentPickerHidden || steerWorker !== undefined ? <CrewModeComposerChip onTurnOff={steerWorker !== undefined ? undefined : turnOffCrewMode} /> : undefined}
+              onAgentClick={provider.capabilities.agentTemplates && !agentPickerHidden && steerWorker === undefined ? (rect, trigger) => { anchorAgentBtn(rect, trigger); setAgentDropdown(!agentDropdown) } : undefined}
               onModelClick={(rect, trigger, composerHadFocus) => {
                 modelPickerReturnsFocusRef.current = !!composerHadFocus
                 anchorModelBtn(rect, trigger); setModelDropdown(!modelDropdown)
@@ -750,7 +742,6 @@ export default function ComposerDockView({
             />
               </Composer>
               {steerWorker !== undefined && steerTooLong && <p role="alert" className="mt-1 px-1 text-[12px] text-danger-text" data-testid="crew-steer-too-long">{i18nT('components.crewMode.steer_too_long', { max: CREW_STEER_MAX_CHARS.toLocaleString() })}</p>}
-              {steerWorker !== undefined && !steerRootClosed && <p className="mt-1 px-1 text-[11px] text-muted" data-testid="crew-steer-hint" data-running={steerRunning ? 'true' : 'false'}>{steerRunning ? i18nT('components.crewMode.steer_hint_running') : i18nT('components.crewMode.steer_hint_idle', { name: steerWorker })}</p>}
               </div>
             </div>
             {/* Agent dropdown portal — triggered from input bar */}

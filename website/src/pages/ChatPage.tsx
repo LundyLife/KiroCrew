@@ -18,7 +18,6 @@ import { useActiveSlotState } from './chat/page/activeSlotState'
 import { useComposerDraftState, ComposerDraftSync, useComposerIntakeRefs, useMainComposerHandoff, useComposerVoiceHost } from './chat/page/composerHost'
 import { useModelPickerModels, useNewSessionPicks, useSessionChoices } from './chat/page/sessionPicks'
 import { useCrewModeSwitch } from './chat/page/crewModeSwitch'
-import { useCrewWorkerIsDone } from './chat/command-center/CrewWorkerList'
 import { runsCrewMode } from '../lib/crewMode'
 import { useSteerDelivery, useRefusedPress, useRegenerate } from './chat/page/turnActions'
 import { useTranscriptScrollRefs, useTranscriptPaging } from './chat/page/transcriptPaging'
@@ -656,7 +655,6 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
   // sent (`crew_mode_locked`) and the loaded rows are the only way to know.
   const hasUserMessage = slotLoading || messages.some(m => m.role === 'user')
   const { crewModeEligible, crewModeOn, crewModeChosen, crewModeLeaving, turnOnCrewMode, turnOffCrewMode, openTaskBoard } = useCrewModeSwitch({ currentSlot, defaultAgent, hasUserMessage, switchAgent, openView: tabsCtl.openView })
-  const steerWorkerDone = useCrewWorkerIsDone(currentSlot?.crew_root ?? '', currentSlot?.key ?? '')
   // From the chip press to the first message the transcript shows the Crew Mode
   // welcome without a break: a slot reload in that window (the switch's own reads,
   // or a re-fetch of the same empty chat, `slotLoading`) and a slot record that has
@@ -1108,7 +1106,6 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
               agentPickerHidden={crewModeChosen || (!crewModeLeaving && runsCrewMode(currentSlot?.agent, currentSlot?.agent_kind, currentSlot?.crew_mode_agent))}
               turnOffCrewMode={turnOffCrewMode}
               steerWorker={currentSlot?.crew_root ? (currentSlot.title || i18nT('commandCenter.worker_untitled')) : undefined}
-              steerWorkerDone={steerWorkerDone}
               steerWorkerRoot={currentSlot?.crew_root || ''}
             />
           </div>
