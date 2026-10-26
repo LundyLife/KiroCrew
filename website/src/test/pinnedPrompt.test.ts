@@ -487,6 +487,16 @@ describe('computePinnedTopReserve', () => {
     expect(computePinnedTopReserve(90) - computePinnedTopReserve(60)).toBe(30)
   })
 
+  it('adds the fold offset, so the card hanging below a title row is covered too', () => {
+    // The main chat's fold sits under the title row, below the scroller's top
+    // edge; the card hangs off the fold, so the reserve must reach that far too.
+    expect(computePinnedTopReserve(60, 40)).toBe(40 + computePinnedTopReserve(60))
+    // A fold at or above the scroller's top adds nothing.
+    expect(computePinnedTopReserve(60, -5)).toBe(computePinnedTopReserve(60))
+    // Nothing pinned still reserves nothing, whatever the fold offset.
+    expect(computePinnedTopReserve(0, 40)).toBe(0)
+  })
+
   it('sits one clearance below the card bottom, mirroring the dock reserve', () => {
     // Card bottom relative to the fold is ROW_PAD_Y + bannerH; the reserve is
     // that plus the clearance, so the first row starts PINNED_RESERVE_CLEARANCE_PX

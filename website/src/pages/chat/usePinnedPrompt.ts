@@ -475,28 +475,32 @@ export function usePinnedPrompt({ scrollerRef, requiresMountedHandoff = false }:
   // against the fold, so the same rows stay above it and the pin is stable. The
   // applied reserve is tracked in a ref so only the DELTA is compensated, never
   // the whole value on an unrelated re-render.
+  //
+  // The card hangs off the FOLD, not off the scroller's top edge: on the main
+  // chat page the scroller starts at the column top, under the title overlay,
+  // and the fold sits below the title row. So the reserve also pays for the
+  // fold's offset from the scroller's top, measured live. The offset is read
+  // against the scroller's REST top (its box minus the margin already applied),
+  // so applying the margin never changes the offset it was sized from.
   const appliedReserveRef = useRef(0)
-  const reserve = pinned ? computePinnedTopReserve(pinned.bannerH) : 0
+  const pinnedBannerH = pinned ? pinned.bannerH : 0
   useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el) return
     const prevReserve = appliedReserveRef.current
+    let reserve = 0
+    if (pinnedBannerH > 0) {
+      const restTop = el.getBoundingClientRect().top - prevReserve
+      const foldY = pinFoldRef.current?.getBoundingClientRect().top ?? restTop
+      reserve = Math.round(computePinnedTopReserve(pinnedBannerH, foldY - restTop))
+    }
     if (reserve === prevReserve) return
     el.style.marginTop = reserve > 0 ? `${reserve}px` : ''
     // Hold the transcript still against the fold: a larger reserve pushed the
     // rows down, so scroll the content up by the same amount to put them back.
     el.scrollTop = Math.max(0, el.scrollTop + (reserve - prevReserve))
     appliedReserveRef.current = reserve
-  }, [reserve, scrollerRef])
-  // Release the inset when the hook unmounts, so a scroller reused by another
-  // mount (a host that swaps panes on one ref) does not inherit a stale margin.
-  useEffect(() => () => {
-    const el = scrollerRef.current
-    if (el && appliedReserveRef.current !== 0) {
-      el.style.marginTop = ''
-      appliedReserveRef.current = 0
-    }
-  }, [scrollerRef])
+  }, [pinnedBannerH, pinned?.idx, scrollerRef])
   // rAF-throttle the per-scroll recompute: updatePinnedPrompt does a
   // querySelectorAll + getBoundingClientRect loop (a forced layout read), and a
   // fling fires scroll dozens of times/sec. Coalesce to at most once per frame,
@@ -616,6 +620,5 @@ export function usePinnedPrompt({ scrollerRef, requiresMountedHandoff = false }:
     onScrollPin,
     pinnedJumpChrome,
     jumpToPinnedPromptInPlace,
-    pinnedReserve: reserve,
   }
 }

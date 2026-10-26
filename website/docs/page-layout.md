@@ -295,8 +295,10 @@ dock has one at the bottom: an absolute overlay beside the scroller reserves
 nothing in the scroller's own flow, so without this the first readable row
 paints UNDER the card (#15993 — the "N agents queued" card sliced under the
 bar). So while a prompt is pinned, `usePinnedPrompt` gives the scroller back the
-card's strip from its TOP — `computePinnedTopReserve(bannerH)` = the card's
-`ROW_PAD_Y` offset below the fold, its settled resting height, and a clearance —
+card's strip from its TOP — `computePinnedTopReserve(bannerH, foldOffset)` = the
+fold's offset below the scroller's top (the main chat's title row, measured live
+against the scroller's rest top), the card's `ROW_PAD_Y` offset below the fold,
+its settled resting height, and a clearance —
 and the row begins below the card. This is a VIEWPORT-ANCHORED inset: a top
 MARGIN that shrinks the scroller's box from the top, applied by the hook (which
 owns the scroller) because the card pins only once a prompt has scrolled above

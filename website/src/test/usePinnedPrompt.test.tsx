@@ -312,17 +312,17 @@ describe('usePinnedPrompt (shared pinned-prompt geometry)', () => {
     trackScroll(g.rows[2], 300, 40, g)
     wire(h, g)
     // Target row 2 sits at content y=300. `wire` pins the prompt, so the hook
-    // reserves the card's strip at the top (computePinnedTopReserve(60) = 72) and
-    // compensates scrollTop by that delta to hold the content against the fold:
-    // the baseline is 200 + 72 = 272. The glide converges to the chrome-derived
+    // reserves the card's strip at the top (fold offset 100 +
+    // computePinnedTopReserve(60) = 172) and compensates scrollTop by that delta
+    // to hold the content against the fold: the baseline is 200 + 172 = 372. The glide converges to the chrome-derived
     // goal regardless of the start — fold (100) + pinPushTravel(bannerH 70 → 74)
     // + 24px slack = 198, so 300 − 198 = 102.
     act(() => { h.result.current.jumpToPinnedPromptInPlace(2, mountedSteer) })
     expect(frames).toHaveLength(1)
     flushFrame(0)     // t=0: no movement yet
-    expect(g.scrollTop).toBe(272)
+    expect(g.scrollTop).toBe(372)
     flushFrame(225)   // mid-travel: strictly between, i.e. a glide, not a teleport
-    expect(g.scrollTop).toBeLessThan(272)
+    expect(g.scrollTop).toBeLessThan(372)
     expect(g.scrollTop).toBeGreaterThan(102)
     flushFrame(600)   // past the travel: on the goal, and STILL armed
     expect(g.scrollTop).toBe(102)
@@ -347,10 +347,10 @@ describe('usePinnedPrompt (shared pinned-prompt geometry)', () => {
     expect(frames).toHaveLength(1)
     // A wheel event is user scroll intent (attachUserScrollIntent): the glide
     // must stop writing scrollTop, drop its queued frame and leave the reader
-    // where they are — at the reserve-compensated baseline (200 + 72).
+    // where they are — at the reserve-compensated baseline (200 + 172).
     act(() => { g.scroller.dispatchEvent(new Event('wheel')) })
     expect(frames).toHaveLength(0)
-    expect(g.scrollTop).toBe(272)
+    expect(g.scrollTop).toBe(372)
   })
 
   it('steers an absent target by estimate, glides, and lands below the banner chrome', () => {
@@ -921,17 +921,22 @@ describe('usePinnedPrompt in-place jump under reduced motion', () => {
  * defence against.
  */
 describe('usePinnedPrompt reserves the top edge for the pinned card (#15993)', () => {
-  it('insets the scroller from the top by the card strip + clearance while a prompt is pinned', () => {
+  // The fixture's fold sits 100px below the scroller's top edge (the main chat's
+  // title row), and the card hangs ROW_PAD_Y below the fold, so the strip the
+  // card covers is FOLD_OFFSET + ROW_PAD_Y + bannerH, plus the 8px clearance.
+  const FOLD_OFFSET = 100
+  const RESERVE = FOLD_OFFSET + ROW_PAD_Y + 60 + 8
+  const marginPx = (g: ReturnType<typeof mountGeometry>) => parseFloat(g.scroller.style.marginTop || '0')
+
+  it('insets the scroller from the top by the fold offset, card strip and clearance while a prompt is pinned', () => {
     const h = renderPin()
     const g = mountGeometry(5)
     wire(h, g)
     // A prompt is pinned above the fold at scrollTop 200 — the scrolled case the
-    // card only exists in. The reserve is the card's settled strip plus the
-    // clearance (ROW_PAD_Y 4 + bannerH 60 + 8), applied as a viewport inset so
-    // the first readable row starts below the card instead of under it.
+    // card only exists in. The reserve reaches past the card's bottom, so the
+    // first readable row starts below the card instead of under it.
     expect(h.result.current.pinned).toMatchObject({ idx: 2 })
-    expect(h.result.current.pinnedReserve).toBe(ROW_PAD_Y + 60 + 8)
-    expect(g.scroller.style.marginTop).toBe(`${ROW_PAD_Y + 60 + 8}px`)
+    expect(g.scroller.style.marginTop).toBe(`${RESERVE}px`)
   })
 
   it('is a top MARGIN on the scroller, never padding on the scroll content', () => {
@@ -954,7 +959,7 @@ describe('usePinnedPrompt reserves the top edge for the pinned card (#15993)', (
     // that much relative to the viewport; adding the reserve to scrollTop scrolls
     // the content back up the same amount, so the row that was at the fold stays
     // at the fold. The visible position is unchanged — only the raw number moved.
-    expect(g.scrollTop).toBe(before + h.result.current.pinnedReserve!)
+    expect(g.scrollTop).toBe(before + RESERVE)
   })
 
   it('does not re-shift or flicker on a recompute that keeps the same prompt pinned', () => {
@@ -962,15 +967,34 @@ describe('usePinnedPrompt reserves the top edge for the pinned card (#15993)', (
     const g = mountGeometry(5)
     wire(h, g)
     const settled = g.scrollTop
-    const reserve = h.result.current.pinnedReserve
     // A second recompute with the content held against the fold must find the
     // SAME prompt pinned (the compensation kept it above the fold) and apply NO
     // further scrollTop change — the delta is 0, so the pin cannot unpin→re-pin.
     act(() => { h.result.current.updatePinnedPrompt() })
     expect(h.result.current.pinned).toMatchObject({ idx: 2 })
-    expect(h.result.current.pinnedReserve).toBe(reserve)
     expect(g.scrollTop).toBe(settled)
-    expect(g.scroller.style.marginTop).toBe(`${reserve}px`)
+    expect(g.scroller.style.marginTop).toBe(`${RESERVE}px`)
+  })
+
+  it('reads the fold offset against the scroller\'s rest top, so its own margin never feeds back', () => {
+    const h = renderPin()
+    const g = mountGeometry(5)
+    // A real scroller's box moves down by the margin it carries; model that so
+    // a re-size after the first inset measures against the shifted box.
+    Object.defineProperty(g.scroller, 'getBoundingClientRect', {
+      configurable: true, value: () => rect(marginPx(g), 400 - marginPx(g)),
+    })
+    wire(h, g)
+    expect(marginPx(g)).toBe(RESERVE)
+    const settled = g.scrollTop
+    // The card settles 20px taller: the reserve grows by exactly 20, not by the
+    // margin already applied, and scrollTop is compensated by the same 20.
+    act(() => {
+      h.result.current.onPinCollapsedHeight(80)
+      h.result.current.updatePinnedPrompt()
+    })
+    expect(marginPx(g)).toBe(RESERVE + 20)
+    expect(g.scrollTop).toBe(settled + 20)
   })
 
   it('releases the inset and compensates scrollTop back when the pin drops', () => {
@@ -987,7 +1011,6 @@ describe('usePinnedPrompt reserves the top edge for the pinned card (#15993)', (
       h.result.current.updatePinnedPrompt()
     })
     expect(h.result.current.pinned).toBeNull()
-    expect(h.result.current.pinnedReserve).toBe(0)
     expect(g.scroller.style.marginTop).toBe('')
     expect(g.scrollTop).toBe(before)
   })
@@ -1001,7 +1024,6 @@ describe('usePinnedPrompt reserves the top edge for the pinned card (#15993)', (
     const before = g.scrollTop
     wire(h, g, [single(0, 'user', 'only prompt'), single(1, 'assistant', 'reply')])
     expect(h.result.current.pinned).toBeNull()
-    expect(h.result.current.pinnedReserve).toBe(0)
     expect(g.scroller.style.marginTop).toBe('')
     expect(g.scrollTop).toBe(before)
   })

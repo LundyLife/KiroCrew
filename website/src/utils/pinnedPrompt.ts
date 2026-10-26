@@ -332,7 +332,8 @@ export const PINNED_RESERVE_CLEARANCE_PX = 8
  * scroller's own flow knows nothing of its footprint; without this the first
  * row paints under the card (#15993 — the "N agents queued" card sliced under
  * the bar). The card sits `ROW_PAD_Y` below the fold and stands `bannerH` tall,
- * so it occupies `ROW_PAD_Y + bannerH` of the scroller's top edge; the
+ * and the fold itself sits `foldOffset` below the scroller's top edge, so the
+ * card occupies `foldOffset + ROW_PAD_Y + bannerH` of that edge; the
  * clearance adds the same gap the dock reserve leaves at the bottom.
  *
  * Sized from the SETTLED resting height (`pinCollapsedHRef`, what the card
@@ -349,10 +350,12 @@ export const PINNED_RESERVE_CLEARANCE_PX = 8
  * byte-for-byte the prior layout; clamped at 0 for a degenerate negative height.
  *
  * @param bannerH the card's settled resting height
+ * @param foldOffset how far the fold sits below the scroller's top edge (the
+ *   main chat's title row); clamped at 0
  */
-export function computePinnedTopReserve(bannerH: number): number {
+export function computePinnedTopReserve(bannerH: number, foldOffset = 0): number {
   if (bannerH <= 0) return 0
-  return ROW_PAD_Y + bannerH + PINNED_RESERVE_CLEARANCE_PX
+  return Math.max(0, foldOffset) + ROW_PAD_Y + bannerH + PINNED_RESERVE_CLEARANCE_PX
 }
 
 /**
