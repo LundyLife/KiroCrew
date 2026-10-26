@@ -474,12 +474,41 @@ When `kiro_crew.edition.is_enterprise()` is true, neither channel above applies:
   document says, so a cold cache and a fetch that cannot complete abort boot. A
   last-known-good cache from the same source within its staleness bound is still served.
 - A cache-only child refuses a cache recorded against any other source.
-- `KIROCREW_POLICY_HEADERS` (the request credential) is still read: it cannot change
-  the address.
+- `KIROCREW_POLICY_HEADERS` is still read but not sent: the enterprise transport
+  carries the sign-in's own credential.
 
-The constant is a placeholder on a reserved `.invalid` domain until the real endpoint
-is chosen, so an enterprise build fails closed at boot until then. A test address needs
-its own build.
+The constant is `kirocps://enterprise-management`, served by
+`platform/enterprise_policy_fetch.py` (registered for the `kirocps` scheme; it refuses
+in an oss build). One fetch is the Kiro control plane's
+`GetEffectiveEnterpriseManagementResourceWithToken`, AWS JSON 1.0:
+
+- **Address.** `control_plane_url(profile_region(arn))` from
+  `auth/login/control_plane.py`, the region table the IdC login already uses. The URL's
+  host part is not an address, and nothing in the environment or config names one.
+- **Identity.** The Kiro sign-in in Crew's vault (`kirocrew kas login`), refreshed by
+  `KasAuthProvider` with the `KIRO_API_KEY` bypass off. `Authorization: Bearer`, plus
+  `TokenType: EXTERNAL_IDP` for an External IdP sign-in. The body names the profile
+  ARN and the client surface `CREW`.
+- **Trust.** TLS with default verification, redirects refused (`_open`), the pinned
+  host, and the reply's `manifest.hash` (SHA-256 of the body) when it carries one.
+  There is no signature layer.
+- **Answer.** `ENABLED` carries Trust V2 YAML, which
+  `platform/enterprise_policy_translate.py` turns into a Crew document (today
+  `messaging_channel` to `channels.members`), re-read every 300 s. `DISABLED` answers
+  a document that names no scope, so the baseline holds every control. `UNCHANGED`
+  keeps the cache. `NOT_ELIGIBLE`, an HTTP error, an unreachable service, a malformed
+  answer, a hash mismatch and an untranslatable rule each raise. With no usable cache,
+  boot then exits through `enterprise_boot.refuse_policy_boot` with the reason.
+- **One profile's cache.** Every profile shares the one source, so the document records
+  a digest of the profile it was read for in `identity.issuer`, and the validator
+  carries the same digest. The boot tier serves a cached copy (fresh-cache shortcut or
+  outage fallback) only when it matches the profile in the vault now; another
+  profile's version is never sent as `manifestVersionId`.
+- **Signing in first.** `kirocrew kas login`, `whoami` and `logout` run when the policy
+  load fails, so the sign-in the fetch needs can be created. Every other command still
+  exits.
+
+A test address needs its own build.
 
 **No credentials in the document, and no provenance flag either.** `distribution`
 has no `headers` field on purpose: a document published to the whole fleet must not

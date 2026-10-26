@@ -55,13 +55,21 @@ POLICY_UNAVAILABLE_ENV = "KIROCREW_POLICY_ON_UNAVAILABLE"
 #: handed the means to fetch it — see :func:`cache_only`.
 POLICY_CACHE_ONLY_ENV = "KIROCREW_POLICY_CACHE_ONLY"
 
+#: The scheme of the enterprise build's policy source: the Kiro control plane's
+#: enterprise-management read for the signed-in profile
+#: (:mod:`kiro_crew.platform.enterprise_policy_fetch`). Not a URL scheme anyone types:
+#: the host is not in the URL at all, it comes from the build's control-plane region
+#: table (``kiro_crew.auth.login.control_plane``).
+ENTERPRISE_POLICY_SCHEME = "kirocps"
+
 #: The enterprise build's policy source (RFC rfc-crew-enterprise-edition, D2). In an
 #: enterprise build this is the ONLY source: :data:`POLICY_URL_ENV`, the other
 #: ``KIROCREW_POLICY_*`` settings and any ``distribution.source`` in a local or fetched
-#: document are ignored. PLACEHOLDER on a reserved domain that never resolves, so an
-#: enterprise build fails closed at boot until it is replaced with the real endpoint
-#: before the enable step (the RFC's Migration plan, phase 2). An oss build never reads it.
-ENTERPRISE_POLICY_URL = "https://governance.example.invalid/crew/policy"
+#: document are ignored. The host part names WHAT is read, not where: the address is the
+#: control-plane host for the signed-in profile's region, from a table fixed in the
+#: build. It is a word no message uses, because the core redacts the source's host
+#: from every message. An oss build never reads it.
+ENTERPRISE_POLICY_URL = f"{ENTERPRISE_POLICY_SCHEME}://enterprise-management"
 
 #: Every environment variable this tier reads, owned in one place.
 #:
@@ -425,6 +433,34 @@ register_policy_fetcher("https", _fetch_http)
 # plain-http case loopback-only, so there is one code path and one place that decides.
 register_policy_fetcher("http", _fetch_http)
 register_policy_fetcher("file", _fetch_file)
+
+
+def _fetch_enterprise(request: FetchRequest) -> FetchedPolicy:
+    """The enterprise build's transport, imported on first use.
+
+    Lazy so this module binds no new project module and an oss process never imports
+    the control-plane client. The fetcher itself refuses in an oss build.
+    """
+    from kiro_crew.platform.enterprise_policy_fetch import fetch
+
+    return fetch(request)
+
+
+register_policy_fetcher(ENTERPRISE_POLICY_SCHEME, _fetch_enterprise)
+
+
+def _cache_selected_for_this_host(source: str, body: bytes) -> bool:
+    """May the cached *body* recorded for *source* be served to whoever runs now?
+
+    ``True`` for every source but the enterprise one, whose document is selected by the
+    signed-in profile as well as the source: a profile switch must not inherit the
+    previous profile's ceiling from the cache.
+    """
+    if _split_url(source).scheme.lower() != ENTERPRISE_POLICY_SCHEME:
+        return True
+    from kiro_crew.platform.enterprise_policy_fetch import cache_is_for_signed_in_user
+
+    return cache_is_for_signed_in_user(body)
 
 
 # ──────────────────────────────────────────────────────────────────────────

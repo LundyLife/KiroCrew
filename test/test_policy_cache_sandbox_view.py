@@ -7,7 +7,7 @@ and the process resolves the ceiling in cache-only mode: no fetch, no sign-in, a
 refusal when the cache is missing, damaged or stale. The vault and the sign-in stay
 hidden. An oss build is unchanged.
 
-The https transport is a fake from the shared ``transport`` fixture, so nothing here
+The enterprise transport is a fake from the shared ``transport`` fixture, so nothing here
 opens a socket.
 """
 
@@ -60,7 +60,9 @@ def _as_child(monkeypatch) -> None:
 
 def _gateway_boot(transport, marker: str = "central") -> None:
     """Boot as the gateway against a fake control plane, which writes the cache."""
-    transport(_static_fetcher(pd.FetchedPolicy(body=_body(marker))), scheme="https")
+    transport(
+        _static_fetcher(pd.FetchedPolicy(body=_body(marker))), scheme=pd.ENTERPRISE_POLICY_SCHEME
+    )
     ceiling = governance.load_security_policy()
     assert ceiling is not None and ceiling.identity_issuer == marker
 
@@ -73,7 +75,7 @@ def _child_transport(transport) -> list:
         seen.append(request)
         raise TimeoutError("a sandboxed child must not fetch")
 
-    transport(fetcher, scheme="https")
+    transport(fetcher, scheme=pd.ENTERPRISE_POLICY_SCHEME)
     return seen
 
 

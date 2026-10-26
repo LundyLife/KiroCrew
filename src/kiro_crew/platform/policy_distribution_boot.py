@@ -51,6 +51,7 @@ from kiro_crew.platform.policy_distribution_source import (
     FetchedPolicy,
     FetchRequest,
     _body_digest,
+    _cache_selected_for_this_host,
     _fetcher_for,
     _is_enterprise,
     _split_url,
@@ -166,6 +167,9 @@ def load_distributed_policy(
     # replace a compromised source.
     if cached is not None and cached.source_digest != _source_digest(dist.source):
         logger.info("the cached ceiling came from a different source; ignoring it after a repoint")
+        cached = None
+    if cached is not None and not _cache_selected_for_this_host(dist.source, cached.body):
+        logger.info("the cached ceiling was read for another sign-in; ignoring it")
         cached = None
 
     window = _fetch_window(dist)
@@ -608,6 +612,8 @@ def _load_from_cached_winner(dist: PolicyDistribution, winner: CachedPolicy) -> 
                 "it was cached against a different source, so it is not this host's "
                 "last-known-good"
             )
+        if not _cache_selected_for_this_host(dist.source, winner.body):
+            raise PlatformCompositionError("it was read for another sign-in")
         ceiling = parse_distributed_policy(winner.body, source=dist.source)
         migrated = _declared_source(winner.body)
         if migrated and migrated != dist.source and not _env_pins_the_source():
