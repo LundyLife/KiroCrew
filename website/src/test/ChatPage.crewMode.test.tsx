@@ -195,15 +195,15 @@ describe('Crew Mode on ChatPage', () => {
     expect(screen.getByTestId('crew-mode-composer-chip')).toHaveTextContent('Crew Mode')
   })
 
-  it('opens a worker like a session: breadcrumb and Back to Crew Mode', async () => {
+  it('opens a worker like a session: breadcrumb and Back to main chat', async () => {
     const store = await renderWith({ messages: [{ role: 'user', content: 'do part 2' }], agent: 'kirocrew-worker', agentKind: 'template', createdBy: 'root-1', crewRoot: 'root-1', slotKeys: ['slot-a', 'root-1'] })
     const crumb = screen.getByTestId('crew-worker-breadcrumb')
     expect(crumb).toHaveTextContent('Sample goal')
     expect(crumb).toHaveTextContent('Worker B')
     expect(screen.getByTestId('crew-steer-composer')).toBeInTheDocument()
-    // Owner ruling: the button names Crew Mode, and its accessible name says the same.
-    const back = screen.getByRole('button', { name: 'Back to Crew Mode' })
-    expect(back).toHaveTextContent('Back to Crew Mode')
+    // Owner ruling: the button names the main chat, and its accessible name says the same.
+    const back = screen.getByRole('button', { name: 'Back to main chat' })
+    expect(back).toHaveTextContent('Back to main chat')
     expect(screen.queryByText(/Back to conductor/)).toBeNull()
     fireEvent.click(back)
     await waitFor(() => expect(store.getState().chat.activeSlot).toBe('root-1'))
@@ -278,10 +278,10 @@ describe('Crew Mode on ChatPage', () => {
     const gate = await screen.findByTestId('crew-worker-root-closed')
     expect(gate).toHaveTextContent('to keep working')
     expect(screen.getByTestId('crew-worker-reopen-root')).toHaveTextContent('Reopen')
-    // The breadcrumb's button names Crew Mode too, in its text and accessible name.
+    // The breadcrumb's button names the main chat too, in its text and accessible name.
     const crumbReopen = screen.getByTestId('crew-back-to-conductor')
-    expect(crumbReopen).toHaveAccessibleName('Reopen Crew Mode')
-    expect(crumbReopen).toHaveTextContent('Reopen Crew Mode')
+    expect(crumbReopen).toHaveAccessibleName('Reopen main chat')
+    expect(crumbReopen).toHaveTextContent('Reopen main chat')
     expect(screen.queryByText(/Reopen conductor/)).toBeNull()
     const box = within(screen.getByTestId('crew-steer-composer')).getByRole('textbox')
     expect(box).toHaveAttribute('aria-disabled', 'true')

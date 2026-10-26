@@ -686,10 +686,10 @@ as that markdown under its title rather than as raw text in the frame. A card op
 worker in the MAIN pane like any session with the Workers tab in front of its
 panel; on a phone the panel sheet closes. The worker view's header is a
 breadcrumb (`CrewWorkerBreadcrumb`: ghost, root title, worker, status) with
-"Back to Crew Mode" (with the root's tab closed: its saved title and the worker's
+"Back to main chat" (with the root's tab closed: its saved title and the worker's
 real group, both read from saved data by the worker list, which answers a closed
 root with `root_closed: true` and `root_title`; a line saying the conductor is
-closed; and "Reopen Crew Mode", which reopens it from its saved transcript). With
+closed; and "Reopen main chat", which reopens it from its saved transcript). With
 the root closed the worker's composer is off and says "Reopen <conductor> to keep
 working" with a Reopen button, and `POST /api/chat` refuses a person's send to that
 worker (`409 crew_root_closed`) before anything is queued, the same live-root

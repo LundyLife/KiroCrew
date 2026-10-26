@@ -201,8 +201,8 @@ at the cap still reads.
 In a Crew Mode chat you can type into any crew member (a worker session): open it
 from the **Crew** tab of the side panel and type in its composer, which looks like
 the conductor's own. While its reply runs, a send cuts into that reply; otherwise
-it starts a new turn. **Back to Crew Mode** above it returns to the conductor
-(**Reopen Crew Mode** when the conductor's tab is closed). The text
+it starts a new turn. **Back to main chat** above it returns to the conductor
+(**Reopen main chat** when the conductor's tab is closed). The text
 reaches the worker as your own message, and when that worker holds an item on the
 chat's own ledger the item also gets one `steer` event: the time, actor `person`,
 and your text, redacted and cut to 500 characters. `work_ledger_read` shows it in

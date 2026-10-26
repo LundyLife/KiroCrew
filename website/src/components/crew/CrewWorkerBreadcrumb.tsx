@@ -11,7 +11,7 @@ import { CrewGhostBadge, CrewStatusDot } from './CrewModeMarks'
 
 /**
  * The worker view's header: `[ghost] <root title> > <worker> [status]` and a
- * "Back to Crew Mode" button. Shown in place of the session title when the main
+ * "Back to main chat" button. Shown in place of the session title when the main
  * pane holds one of a Crew Mode root's workers, so the person always sees whose
  * worker this is and has one click back. The root title is a button too.
  */
@@ -41,7 +41,7 @@ export function CrewWorkerBreadcrumb({ root, worker }: { root: string; worker: C
     setReopenFailed(false)
     void reopenCrewWorker(dispatch, root, rootTitle, !isMobile).then(ok => { if (!ok) setReopenFailed(true) })
   }
-  const backLabel = rootClosed ? i18nT('components.crewMode.reopen_crew_mode') : i18nT('components.crewMode.back_to_crew_mode')
+  const backLabel = rootClosed ? i18nT('components.crewMode.reopen_main_chat') : i18nT('components.crewMode.back_to_main_chat')
   return (
     <div className="flex flex-col gap-1 min-w-0 w-full">
       <nav aria-label={i18nT('components.crewMode.breadcrumb_label')} data-testid="crew-worker-breadcrumb" className="@container/crumb flex items-center gap-2 min-w-0 w-full pointer-events-auto">
