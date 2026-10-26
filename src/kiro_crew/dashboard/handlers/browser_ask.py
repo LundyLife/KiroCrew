@@ -109,7 +109,12 @@ async def run_ask(hub: LiveHub, key: str, args: dict[str, Any]) -> dict[str, Any
         return _refused("no_live_view")
     probe = qa.PageProbe(stream.relay, stream.session_id)
     try:
-        ask = await qa.bind_ask(probe, spec, float(getattr(stream, "scale", 1.0) or 1.0))
+        ask = await qa.bind_ask(
+            probe,
+            spec,
+            float(getattr(stream, "scale", 1.0) or 1.0),
+            getattr(stream, "frames", None),
+        )
     except qa.AskError as exc:
         _audit("browser_ask", "refused", exc.code)
         return _refused(exc.code)
@@ -146,18 +151,25 @@ async def _tick(hub: LiveHub, key: str, ask: qa.QuickAsk) -> None:
     if asyncio.get_running_loop().time() >= ask.deadline:
         await _finish(hub, key, ask, "timeout", qa.TIMED_OUT)
         return
-    if ask.spec.kind != "human_check" or ask.phase != qa.PHASE_TAKEN_OVER:
+    if not ask.spec.takes_over or ask.phase != qa.PHASE_TAKEN_OVER:
         return
+    sign_in = ask.spec.sign_in_takeover
     sess = hub.get(key)
     if sess is None or not sess.lock.held():
-        # Handed back with Esc instead of Done: the person stopped.
-        await _finish(hub, key, ask, "hand_back", qa.CANCELLED)
+        # Handed back with Esc instead of Done: the person stopped. After a sign-in
+        # that is the usual way out; the agent looks at the page either way.
+        await _finish(hub, key, ask, "hand_back", qa.PASSED if sign_in else qa.CANCELLED)
         return
     stream = sess.stream
     if stream is None or not stream.session_id:
         return
     if stream.target_id != ask.target_id:
         await _finish(hub, key, ask, "page_moved", qa.ORIGIN_CHANGED)
+        return
+    if sign_in:
+        # A sign-in that submits moves the page on: hand the browser back then.
+        if await qa.page_moved(qa.PageProbe(stream.relay, stream.session_id), ask):
+            await _finish(hub, key, ask, "page_moved", qa.PASSED)
         return
     try:
         passed = await qa.human_check_passed(qa.PageProbe(stream.relay, stream.session_id), ask)
@@ -274,6 +286,8 @@ async def _act(
         await _finish(hub, key, ask, action, qa.ORIGIN_CHANGED)
         return _fail(409, qa.ORIGIN_CHANGED)
     probe = qa.PageProbe(stream.relay, stream.session_id)
+    if action in ("take_over", "done") and not ask.spec.takes_over:
+        return _fail(400, "bad_action")
     if action == "done":
         if ask.phase != qa.PHASE_TAKEN_OVER:
             return _fail(400, "bad_action")
@@ -304,12 +318,17 @@ async def _act(
 
 
 async def _take_over(hub: LiveHub, key: str, ask: qa.QuickAsk, probe: qa.PageProbe) -> web.Response:
-    """human_check: the person gets the widget's box, and nothing else, for its timeout."""
+    """The person's hands on the page for the ask's timeout.
+
+    human_check: only the widget's box takes input. The sign-in takeover: the
+    whole page does (a submit button may sit outside the form); the card zooms
+    on the form, and the ask hands back on Done, Esc or the page moving on.
+    """
     if ask.phase == qa.PHASE_TAKEN_OVER:
         return _ok()
     try:
         async with hub.op_fence(key):
-            rect = await qa.widget_rect_now(probe, ask)
+            rect = await qa.takeover_rect_now(probe, ask)
     except qa.AskError:
         await _finish(hub, key, ask, "take_over", qa.ORIGIN_CHANGED)
         return _fail(409, qa.ORIGIN_CHANGED)
@@ -317,7 +336,7 @@ async def _take_over(hub: LiveHub, key: str, ask: qa.QuickAsk, probe: qa.PagePro
     if sess is None:
         return _fail(409, "stale")
     held_already = sess.lock.held()
-    if not held_already:
+    if not held_already and not ask.spec.sign_in_takeover:
         # Scoped BEFORE the claim publishes in_control, so no card event can land
         # outside the box. Only a takeover this ask makes is scoped; one the person
         # already had stays theirs.
@@ -327,7 +346,7 @@ async def _take_over(hub: LiveHub, key: str, ask: qa.QuickAsk, probe: qa.PagePro
     except LookupError:
         claimed = False
     if not claimed:
-        if not held_already:
+        if not held_already and not ask.spec.sign_in_takeover:
             sess.input_rect = None
         return _fail(409, "stale")
     ask.claimed = not held_already

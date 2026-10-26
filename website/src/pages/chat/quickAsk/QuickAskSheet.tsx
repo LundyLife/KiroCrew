@@ -10,7 +10,7 @@ import { sanitizeLlmOutput } from '../../../utils/sanitize'
 import { browserLiveStore } from '../../../hooks/useBrowserLive'
 import { askUi } from './askUi'
 import {
-  answerErrorText, askIcon, askTitle, labelWord, OriginLine, originHost, otpDigits, QuickAskTargetRing, ReasonLine, textLabel,
+  answerErrorText, askIcon, askTitle, isSignInTakeover, labelWord, OriginLine, originHost, otpDigits, QuickAskTargetRing, ReasonLine, textLabel,
 } from './QuickAskParts'
 import { recall, remember, type RememberKey } from './remember'
 import type { QuickAsk, QuickAskAction, QuickAskField, QuickAskValues } from './types'
@@ -167,10 +167,12 @@ type Send = (action: QuickAskAction, values?: QuickAskValues) => Promise<boolean
 
 function AskBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; send: Send }) {
   switch (ask.kind) {
-    case 'credentials': return <CredentialsBody ask={ask} busy={busy} send={send} />
+    case 'credentials': return isSignInTakeover(ask)
+      ? <TakeOverBody explainer={i18nT('pages.chat.quickAsk.sign_in_explainer')} primary={i18nT('pages.chat.quickAsk.take_over_sign_in')} busy={busy} send={send} />
+      : <CredentialsBody ask={ask} busy={busy} send={send} />
     case 'text': return <TextBody ask={ask} busy={busy} send={send} />
     case 'otp': return <OtpBody ask={ask} busy={busy} send={send} />
-    case 'human_check': return <HumanCheckBody busy={busy} send={send} />
+    case 'human_check': return <TakeOverBody explainer={i18nT('pages.chat.quickAsk.human_check_explainer')} primary={i18nT('pages.chat.quickAsk.take_over_box')} busy={busy} send={send} />
     case 'confirm': return <ConfirmBody ask={ask} busy={busy} send={send} />
   }
 }
@@ -401,11 +403,12 @@ function OtpBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; send: Send
   )
 }
 
-function HumanCheckBody({ busy, send }: { busy: boolean; send: Send }) {
+/** A human check, or a sign-in in a form Kiro cannot reach: the person does it on the page. */
+function TakeOverBody({ explainer, primary, busy, send }: { explainer: string; primary: string; busy: boolean; send: Send }) {
   return (
     <div>
-      <p className="text-[13px] leading-5 text-text">{i18nT('pages.chat.quickAsk.human_check_explainer')}</p>
-      <Actions primary={i18nT('pages.chat.quickAsk.take_over_box')} busy={busy} onPrimary={() => { void send('take_over') }} onDecline={() => { void send('decline') }} />
+      <p className="text-[13px] leading-5 text-text">{explainer}</p>
+      <Actions primary={primary} busy={busy} onPrimary={() => { void send('take_over') }} onDecline={() => { void send('decline') }} />
     </div>
   )
 }

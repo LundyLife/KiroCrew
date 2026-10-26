@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiro_crew.browser_harness.frames import FRAME_READ_CAP, split_frame_ref
 from kiro_crew.browser_snapshots import SNAPSHOT_DIR_NAME
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,9 @@ SLOW_OPS: frozenset[str] = frozenset({"navigate", "back", "wait_for", "reflex"})
 
 WALKER_PATH = Path(__file__).with_name("snapshot_walker.js")
 
-_REF_RE = re.compile(r"^e[1-9][0-9]*$")
+# ``eN`` names an element of the page (same-origin frames included); ``f<tag>eN`` one
+# inside a cross-origin frame the gateway reads itself (``browser_harness.frames``).
+_REF_RE = re.compile(r"^(?:f[1-9][0-9]{0,3})?e[1-9][0-9]*$")
 _MOUSE_BUTTONS = frozenset({"left", "middle", "right", "back", "forward"})
 # CDP takes modifiers as a bitmask: Alt=1, Ctrl=2, Meta/Cmd=4, Shift=8.
 _MODIFIER_BITS = {"alt": 1, "control": 2, "ctrl": 2, "meta": 4, "command": 4, "cmd": 4, "shift": 8}
@@ -194,6 +197,10 @@ class OpContext:
     #: (``LiveHub.inner_mark`` / ``LiveHub.record_op``). No-ops by default.
     mark: Callable[[], Any] = lambda: None
     record: Callable[..., Any] = lambda *_args: None
+    #: The cross-origin frames of the caller's tab (``browser_harness.frames.FrameOps``),
+    #: read at call time, or ``None`` when no stream holds the tab: then a frame ref
+    #: is stale and the outline marks those frames as not read.
+    frames: Callable[[], Any] = lambda: None
 
 
 def screenshot_dir(home: Path) -> Path:
@@ -263,8 +270,12 @@ def format_outline(nodes: list[dict[str, Any]]) -> str:
         line = f'{indent}- {role} "{name}"'
         if n.get("ref"):
             line += f" [ref={n['ref']}]"
+        if n.get("frame"):
+            line += f" [frame {n['frame']}]"
         st = n.get("state") or {}
         if isinstance(st, dict):
+            if st.get("unread"):
+                line += " [cross-origin, not read]"
             if st.get("password"):
                 line += " [password]"
             if st.get("checked"):
@@ -280,9 +291,35 @@ def format_outline(nodes: list[dict[str, Any]]) -> str:
 
 
 async def _page(ctx: OpContext, method: str, *args: Any) -> Any:
-    """Call one method of the walker in the page: the ONLY use of the ``js`` helper."""
+    """Call one method of the walker in the page: the ONLY use of the ``js`` helper.
+
+    A ``f<tag>eN`` ref runs the method in that cross-origin frame instead, through
+    the gateway's session (``resolve`` then answers page pixels). The guards'
+    reads -- what holds focus, how many asked or password fields there are --
+    take the cross-origin frames into account, failing closed when one cannot
+    be read.
+    """
+    framed = split_frame_ref(args[0]) if args else None
+    if framed is not None:
+        frames = ctx.frames()
+        value = (
+            await frames.call(framed[0], method, framed[1], *args[1:])
+            if frames is not None
+            else None
+        )
+        return value if value is not None else {"ok": False, "code": "ref_stale"}
     rendered = ", ".join(json.dumps(a) for a in args)
-    return await ctx.helper("js", expression=f"{WALKER_SOURCE}.{method}({rendered})")
+    value = await ctx.helper("js", expression=f"{WALKER_SOURCE}.{method}({rendered})")
+    if method in ("askedValues", "passwordBoxes") and isinstance(value, int):
+        frames = ctx.frames()
+        if frames is not None:
+            value += await frames.count(method)
+    if method == "activeField" and isinstance(value, dict) and value.get("frame"):
+        frames = ctx.frames()
+        inner = await frames.focused() if frames is not None else None
+        # Focus is inside a cross-origin frame: judge the field there, or nothing.
+        value = inner if inner is not None else {**value, "unreadable": True}
+    return value
 
 
 async def _in_control(ctx: OpContext) -> bool:
@@ -444,17 +481,64 @@ async def _back(ctx: OpContext, _args: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "url": committed["url"], "title": committed.get("title", "")}
 
 
+#: The walker's node cap, shared by the page and every frame read after it.
+NODE_CAP = 1500
+
+
+async def _with_frames(ctx: OpContext, nodes: list[Any]) -> list[Any]:
+    """Fill each cross-origin frame's ``slot`` node with that frame's own outline.
+
+    The node budget is shared: each frame gets what the page and the frames before
+    it left. A frame that cannot be read stays one ``iframe`` line marked so.
+    """
+    slots = [n for n in nodes if isinstance(n, dict) and isinstance(n.get("slot"), int)]
+    frames = ctx.frames() if slots else None
+    if not slots:
+        return nodes
+    ids = await frames.slot_frames(len(slots)) if frames is not None else []
+    budget = NODE_CAP - len(nodes)
+    out: list[Any] = []
+    for n in nodes:
+        if not (isinstance(n, dict) and isinstance(n.get("slot"), int)):
+            out.append(n)
+            continue
+        slot = int(n["slot"])
+        frame_id = ids[slot] if slot < len(ids) and slot < FRAME_READ_CAP else ""
+        read = await frames.outline(frame_id, budget) if frames is not None and frame_id else None
+        head = {k: v for k, v in n.items() if k != "slot"}
+        if read is None:
+            head["state"] = {"unread": True}
+            out.append(head)
+            continue
+        tag, url, inner = read
+        head["frame"] = f"f{tag} {url[:120]}"
+        out.append(head)
+        depth = int(n.get("depth") or 0) + 1
+        for m in inner:
+            out.append({**m, "depth": depth + int(m.get("depth") or 0)})
+        budget -= len(inner)
+    return out
+
+
 async def _snapshot(ctx: OpContext, _args: dict[str, Any]) -> dict[str, Any]:
     await _step(ctx, "Read the page")
     data = await _page(ctx, "snapshot")
     if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
         return refusal("snapshot_error", "snapshot walker returned no data")
+    nodes = await _with_frames(ctx, data["nodes"])
     out: dict[str, Any] = {
         "ok": True,
         "url": data.get("url", ""),
         "title": data.get("title", ""),
-        "snapshot": format_outline(data["nodes"])[:TEXT_CAP],
+        "snapshot": format_outline(nodes)[:TEXT_CAP],
     }
+    unread = sum(1 for n in nodes if isinstance(n, dict) and (n.get("state") or {}).get("unread"))
+    if unread:
+        out["note"] = (
+            f"{unread} cross-origin iframe(s) could not be read, so their fields have no "
+            "refs. To sign in there, use `ask` kind credentials with no targets: the user "
+            "signs in on the page themselves. Never ask for a password in chat."
+        )
     if data.get("error"):
         out["partial"] = str(data["error"])
     return out
@@ -549,6 +633,8 @@ async def _type(ctx: OpContext, args: dict[str, Any]) -> dict[str, Any]:
     active = await _page(ctx, "activeField")
     if not isinstance(active, dict) or not active.get("focused"):
         return refusal("no_focus", "no field has focus; pass a `ref` from a snapshot")
+    if active.get("unreadable"):
+        return _frame_focus_refusal()
     if active.get("password"):
         return _password_refusal(ref)
     if active.get("asked"):
@@ -567,6 +653,14 @@ def _password_refusal(ref: Any) -> dict[str, Any]:
         f"{ref or 'the focused field'} is a password field. The agent never types a "
         "password: use the `ask` op (kind credentials) so the user fills it in on the "
         "live card, or ask them to take over and sign in themselves, then continue.",
+    )
+
+
+def _frame_focus_refusal() -> dict[str, Any]:
+    return refusal(
+        "focus_in_frame",
+        "focus is inside a cross-origin frame that could not be read, so what it holds "
+        "is unknown; snapshot and pass a `ref` from the frame (f<n>e<n>), or use `ask`",
     )
 
 
@@ -600,6 +694,9 @@ async def _press_key(ctx: OpContext, args: dict[str, Any]) -> dict[str, Any]:
         # arrows) are never checked, so the agent can always leave a field.
         active = await _page(ctx, "activeField")
         focused = isinstance(active, dict) and active.get("focused")
+        if focused and active.get("unreadable"):
+            # Unknown field: neither a character nor a modified key, like an asked one.
+            return _frame_focus_refusal()
         if focused and active.get("asked"):
             # Neither a character nor any modified key (select, copy, cut) on the
             # person's field: a copy would carry its value into one the agent reads.

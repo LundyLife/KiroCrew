@@ -175,6 +175,9 @@ def build_context(
             return None
         return hub.record_op(session_key, op, args, result, mark, loop=True)
 
+    def _frames() -> Any:
+        return frame_ops(hub, session_key)
+
     return harness_ops.OpContext(
         helper=supervisor.call,
         step=_step,
@@ -186,7 +189,26 @@ def build_context(
         loop=_loop,
         mark=_mark,
         record=_record,
+        frames=_frames,
     )
+
+
+def frame_ops(hub: LiveHub, key: str) -> Any:
+    """The cross-origin frames of *key*'s tab, through its live stream's session.
+
+    ``None`` unless a stream runs on the tab the session is bound to: the frames'
+    child sessions hang off that stream (``browser_harness.frames``).
+    """
+    from kiro_crew.browser_harness.frames import FrameOps
+
+    sess = hub.get(key)
+    stream = sess.stream if sess is not None else None
+    registry = getattr(stream, "frames", None)
+    if stream is None or registry is None or not stream.session_id:
+        return None
+    if stream.target_id != hub.target_of(key):
+        return None
+    return FrameOps(stream.relay, stream.session_id, registry, harness_ops.WALKER_SOURCE)
 
 
 def committed_url_allowed(url: str) -> bool:

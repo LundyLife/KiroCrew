@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from test_browser_live_hub import FakeStream
+from test_browser_live_hub import SESSION, FakeStream
 from test_browser_live_routes import _app, _post
 
 from kiro_crew.browser_harness import live_hub as lh
@@ -65,25 +65,72 @@ def _node(**over: Any) -> dict[str, Any]:
 
 
 class FakePage:
-    """A CDP peer for one tab: a top frame, nodes by backendNodeId, refs onto them."""
+    """A CDP peer for one tab: a top frame, nodes by backendNodeId, refs onto them.
+
+    Iframes too (:meth:`add_frame`): a same-process one is in the top session's
+    frame tree and its elements' refs are in the top map; an out-of-process one
+    has a child session of its own with its own ref map. Every node belongs to
+    one frame, and an isolated world reads ``sameDoc`` true only for nodes of the
+    frame it was made in, as Chrome would.
+    """
 
     def __init__(self) -> None:
         self.frame = {"id": "F1", "loaderId": "L1", "url": "https://github.com/login"}
         self.nodes: dict[int, dict[str, Any]] = {}
         self.refs: dict[str, int] = {}
+        #: frame id -> {"loaderId", "url", "owner": node, "session": child sid or ""}
+        self.frames: dict[str, dict[str, Any]] = {}
+        self.child_refs: dict[str, dict[str, int]] = {}
+        self._ctx: dict[int, str] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.focused: int | None = None
         #: (node, text) per landed insert.
         self.inserts: list[tuple[int, str]] = []
         self.passed = False
         self.closed = False
+        self.region: list[float] | None = [100, 150, 500, 400]
         self._seq = 100
 
-    def add(self, ref: str, **info: Any) -> int:
+    def add(self, ref: str, frame: str = "F1", **info: Any) -> int:
         self._seq += 1
-        self.nodes[self._seq] = _node(**info)
-        self.refs[ref] = self._seq
+        self.nodes[self._seq] = {**_node(**info), "frame": frame}
+        sid = self.frames.get(frame, {}).get("session", "")
+        (self.child_refs.setdefault(sid, {}) if sid else self.refs)[ref] = self._seq
         return self._seq
+
+    def add_frame(
+        self,
+        frame_id: str,
+        url: str,
+        *,
+        session: str = "",
+        content: tuple = (100, 200, 400, 300),
+        **owner: Any,
+    ) -> int:
+        """An ``<iframe>`` in the top document whose viewport starts at *content*'s corner."""
+        self._seq += 1
+        node = self._seq
+        x, y, w, h = content
+        self.nodes[node] = {
+            **_node(tag="iframe", type="", rect=[x, y, w, h], op=1.0),
+            "frame": "F1",
+            "content": list(content),
+            "hit": True,
+            **owner,
+        }
+        self.frames[frame_id] = {
+            "loaderId": "L" + frame_id,
+            "url": url,
+            "owner": node,
+            "session": session,
+        }
+        return node
+
+    def _frame_of_session(self, sid: str | None) -> dict[str, Any]:
+        for fid, f in self.frames.items():
+            if sid and f["session"] == sid:
+                return {"id": fid, "loaderId": f["loaderId"], "url": f["url"], "parentId": "F1"}
+        return dict(self.frame)
 
     def rerender(self, ref: str) -> None:
         """The framework replaced the element: same ref name, a new node; the old one detached."""
@@ -101,29 +148,73 @@ class FakePage:
         self, method: str, params: dict[str, Any] | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         params = dict(params or {})
-        self.calls.append((method, params))
+        self.calls.append((method, {**params, "_sid": session_id}))
+        children = {f["session"] for f in self.frames.values() if f["session"]}
+        child = session_id in children
+        if session_id and session_id != SESSION and not child:
+            raise RuntimeError("No session with given id")  # a child that detached
         if method == "Page.getFrameTree":
-            return {"frameTree": {"frame": dict(self.frame)}}
+            if child:
+                return {"frameTree": {"frame": self._frame_of_session(session_id)}}
+            kids = [
+                {"frame": {"id": fid, "loaderId": f["loaderId"], "url": f["url"], "parentId": "F1"}}
+                for fid, f in self.frames.items()
+                if not f["session"]
+            ]
+            return {"frameTree": {"frame": dict(self.frame), "childFrames": kids}}
         if method == "Page.createIsolatedWorld":
-            return {"executionContextId": 7}
+            ctx = 7 + len(self._ctx)
+            self._ctx[ctx] = params["frameId"]
+            return {"executionContextId": ctx}
         if method == "Runtime.evaluate":
+            if "contextId" in params:  # the sign-in takeover's region read
+                return {"result": {"value": {"region": self.region, "vw": 1280, "vh": 800}}}
             ref = re.search(r"get\('(e\d+)'\)", params["expression"])
-            node = self.refs.get(ref.group(1)) if ref else None
+            refs = self.child_refs.get(session_id or "", {}) if child else self.refs
+            node = refs.get(ref.group(1)) if ref else None
             if node is None:
                 return {"result": {"type": "object", "subtype": "null"}}
+            if "frameElement" in params["expression"]:
+                fid = self.nodes[node]["frame"]
+                if fid == self.frame["id"]:
+                    return {"result": {"type": "object", "subtype": "null"}}
+                return {"result": {"objectId": f"m:{self.frames[fid]['owner']}"}}
             return {"result": {"objectId": f"m:{node}"}}
         if method == "DOM.describeNode":
-            return {"node": {"backendNodeId": int(params["objectId"].split(":")[1])}}
+            node = int(params["objectId"].split(":")[1])
+            out = {"backendNodeId": node}
+            for fid, f in self.frames.items():
+                if f["owner"] == node:
+                    out["frameId"] = fid
+            return {"node": out}
+        if method == "DOM.getFrameOwner":
+            f = self.frames.get(params["frameId"])
+            return {"backendNodeId": f["owner"]} if f and not f.get("hide_owner") else {}
+        if method == "DOM.getBoxModel":
+            x, y, w, h = self.nodes[params["backendNodeId"]]["content"]
+            return {"model": {"content": [x, y, x + w, y, x + w, y + h, x, y + h]}}
         if method == "DOM.resolveNode":
             node = params["backendNodeId"]
             if node not in self.nodes:
                 raise RuntimeError("No node with given id found")
-            return {"object": {"objectId": f"i:{node}"}}
+            return {"object": {"objectId": f"i:{node}:{params.get('executionContextId', 0)}"}}
         if method == "Runtime.callFunctionOn":
-            node = int(params["objectId"].split(":")[1])
+            _i, node_s, ctx_s = params["objectId"].split(":")
+            node = int(node_s)
             fn = params["functionDeclaration"]
             if fn == qa._INSPECT_JS:
                 value: Any = dict(self.nodes[node])
+                # A world sees only its own frame's document as `document`.
+                value["sameDoc"] = value.get("sameDoc", True) and (
+                    self._ctx.get(int(ctx_s), "F1") == value["frame"]
+                )
+                if value.get("tag") != "iframe":
+                    fid = value["frame"]
+                    if fid in self.frames:
+                        f = self.frames[fid]
+                        value["vw"] = f.get("vw") or self.nodes[f["owner"]]["content"][2]
+            elif fn == qa._HIT_JS:
+                value = bool(self.nodes[node].get("hit"))
             elif fn == qa._INSERT_JS:
                 # One call: lands only if THIS node holds focus right now.
                 value = self.focused == node

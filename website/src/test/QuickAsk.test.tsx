@@ -342,6 +342,42 @@ describe('quick ask: human check takeover', () => {
   })
 })
 
+describe('quick ask: inside an iframe', () => {
+  const TOP = 'https://secure9.store.apple.com'
+  const IDMSA = 'https://idmsa.apple.com'
+
+  it('names the frame origin and the page it sits in, both in full', () => {
+    show({ ...asks.credentials, origin: IDMSA, top_origin: TOP })
+    expect(screen.getByTestId('quick-ask-origin-text')).toHaveTextContent(t('origin_inside', { origin: IDMSA, top: TOP }))
+    expect(screen.getByRole('heading')).toHaveTextContent(t('title_credentials', { host: 'idmsa.apple.com' }))
+    expect(screen.getByTestId('quick-ask-password')).toBeInTheDocument()
+  })
+
+  it('readQuickAsk keeps a real top origin and drops a fake or equal one', () => {
+    expect(readQuickAsk({ ...asks.credentials, origin: IDMSA, top_origin: TOP })?.top_origin).toBe(TOP)
+    expect(readQuickAsk({ ...asks.credentials, origin: IDMSA, top_origin: 'javascript:x' })?.top_origin).toBeUndefined()
+    expect(readQuickAsk({ ...asks.credentials, top_origin: ORIGIN })?.top_origin).toBeUndefined()
+  })
+
+  it('credentials with no field bound: take over to sign in, no inputs, Done hands back', async () => {
+    const signIn = { ...asks.credentials, id: 'a6', fields: [{ role: 'region', rect }] }
+    show(signIn)
+    const sheet = screen.getByTestId('quick-ask-sheet')
+    expect(sheet.querySelectorAll('input')).toHaveLength(0)
+    expect(sheet).toHaveTextContent(t('sign_in_explainer'))
+    act(() => browserLiveStore.applyFrame(frame(1)))
+    fireEvent.click(screen.getByTestId('quick-ask-primary'))
+    expect(screen.getByTestId('quick-ask-primary')).toHaveTextContent(t('take_over_sign_in'))
+    await waitFor(() => expect(writes.answer).toHaveBeenCalledWith({ session_key: S, ask_id: 'a6', action: 'take_over' }))
+    act(() => browserLiveStore.applyEvent(ev({ ...signIn, phase: 'taken_over' })))
+    expect(screen.getByTestId('quick-ask-takeover')).toHaveTextContent(t('sign_in_takeover_hint'))
+    expect(screen.getByTestId('quick-ask-zoom').style.transform).toContain('scale(')
+    expect(screen.getByTestId('browser-live-canvas')).toHaveAttribute('data-interactive', 'true')
+    fireEvent.click(screen.getByTestId('quick-ask-done'))
+    await waitFor(() => expect(writes.answer).toHaveBeenLastCalledWith({ session_key: S, ask_id: 'a6', action: 'done' }))
+  })
+})
+
 describe('quick ask: surfaces and parsing', () => {
   it('one surface owns the sheet: the big view outranks the card, an explicit open wins', () => {
     askUi.register('card', 'x', 1)

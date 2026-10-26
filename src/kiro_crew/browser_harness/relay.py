@@ -218,6 +218,8 @@ class CdpRelay:
         self._ids = itertools.count(RELAY_ID_BASE)
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self._own_sessions: dict[str, EventCallback] = {}
+        #: Child sessions a relay-owned session auto-attached (out-of-process iframes).
+        self._children: dict[str, set[str]] = {}
         self._adopted: dict[str, str] = {}
         self._agent_targets: list[str] = []
         self._closed = False
@@ -349,7 +351,34 @@ class CdpRelay:
     async def detach(self, session_id: str) -> None:
         """Detach a relay-owned session. A session already gone is not an error."""
         self._own_sessions.pop(session_id, None)
+        self._drop_children(session_id)
         await self.send("Target.detachFromTarget", {"sessionId": session_id}, quiet=True)
+
+    def _track_child(self, parent: str, msg: dict[str, Any]) -> None:
+        """A relay-owned session auto-attached a child (an out-of-process iframe).
+
+        Registered BEFORE the event reaches the owner's callback, and synchronously,
+        so the child's own replies and events are never forwarded to a daemon
+        client: they belong to whoever owns the parent. Detach drops it again.
+        """
+        method = msg.get("method")
+        if method not in ("Target.attachedToTarget", "Target.detachedFromTarget"):
+            return
+        child = (msg.get("params") or {}).get("sessionId")
+        if not isinstance(child, str) or not child:
+            return
+        if method == "Target.attachedToTarget":
+            self._own_sessions[child] = self._own_sessions[parent]
+            self._children.setdefault(parent, set()).add(child)
+        else:
+            self._own_sessions.pop(child, None)
+            self._children.get(parent, set()).discard(child)
+            self._drop_children(child)
+
+    def _drop_children(self, session_id: str) -> None:
+        for child in self._children.pop(session_id, set()):
+            self._own_sessions.pop(child, None)
+            self._drop_children(child)
 
     def owns_session(self, session_id: str) -> bool:
         return session_id in self._own_sessions
@@ -484,6 +513,7 @@ class CdpRelay:
         sid = msg.get("sessionId")
         if isinstance(sid, str) and sid in self._own_sessions:
             if "method" in msg:
+                self._track_child(sid, msg)
                 asyncio.create_task(self._own_sessions[sid](msg))
             return
         if isinstance(mid, int):

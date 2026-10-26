@@ -16,7 +16,8 @@
  *     takeover scoped to that widget.
  */
 export type QuickAskKind = 'credentials' | 'text' | 'otp' | 'human_check' | 'confirm'
-export type QuickAskRole = 'username' | 'password' | 'text' | 'otp' | 'widget' | 'action'
+/** `region`: the box a sign-in takeover zooms on (credentials with no field bound). */
+export type QuickAskRole = 'username' | 'password' | 'text' | 'otp' | 'widget' | 'action' | 'region'
 export type QuickAskInput = 'text' | 'email' | 'tel' | 'password' | 'otp'
 export type QuickAskLabel = 'name' | 'email' | 'username' | 'phone' | 'other'
 
@@ -33,8 +34,10 @@ export interface QuickAskField {
 export interface QuickAsk {
   id: string
   kind: QuickAskKind
-  /** Page origin from the browser, e.g. `https://github.com`. */
+  /** Origin of the frame the ask writes into, from the browser, e.g. `https://idmsa.apple.com`. */
   origin: string
+  /** The tab's own origin when that frame is an iframe from another origin. */
+  top_origin?: string
   /** Agent-authored; plain text on display. */
   reason: string
   fields: QuickAskField[]
@@ -57,9 +60,11 @@ export type QuickAskError = 'origin_changed' | 'stale' | 'not_owner' | 'too_larg
 export interface QuickAskAnswer { ok: boolean; outcome?: string; error?: QuickAskError | string }
 
 const KINDS: ReadonlySet<string> = new Set(['credentials', 'text', 'otp', 'human_check', 'confirm'])
-const ROLES: ReadonlySet<string> = new Set(['username', 'password', 'text', 'otp', 'widget', 'action'])
+const ROLES: ReadonlySet<string> = new Set(['username', 'password', 'text', 'otp', 'widget', 'action', 'region'])
 const INPUTS: ReadonlySet<string> = new Set(['text', 'email', 'tel', 'password', 'otp'])
 const LABELS: ReadonlySet<string> = new Set(['name', 'email', 'username', 'phone', 'other'])
+
+const ORIGIN_RE = /^https?:\/\/[^\s/]+$/i
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
@@ -78,7 +83,7 @@ export function readQuickAsk(raw: unknown): QuickAsk | null {
   const d = raw as Record<string, unknown>
   if (typeof d.id !== 'string' || !d.id) return null
   if (typeof d.kind !== 'string' || !KINDS.has(d.kind)) return null
-  if (typeof d.origin !== 'string' || !/^https?:\/\/[^\s/]+$/i.test(d.origin)) return null
+  if (typeof d.origin !== 'string' || !ORIGIN_RE.test(d.origin)) return null
   const frame = d.frame && typeof d.frame === 'object' ? d.frame as Record<string, unknown> : null
   if (!frame || !finite(frame.w) || !finite(frame.h) || frame.w <= 0 || frame.h <= 0) return null
   const fields: QuickAskField[] = []
@@ -99,6 +104,7 @@ export function readQuickAsk(raw: unknown): QuickAsk | null {
     id: d.id,
     kind: d.kind as QuickAskKind,
     origin: d.origin,
+    ...(typeof d.top_origin === 'string' && ORIGIN_RE.test(d.top_origin) && d.top_origin !== d.origin ? { top_origin: d.top_origin } : {}),
     reason: typeof d.reason === 'string' ? d.reason : '',
     fields,
     frame: { w: frame.w, h: frame.h },

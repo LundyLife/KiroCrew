@@ -63,7 +63,9 @@ export function OriginLine({ ask, className = '' }: { ask: QuickAsk; className?:
   return (
     <div className={`flex min-w-0 items-start gap-1.5 text-[12px] ${className}`} data-testid="quick-ask-origin">
       <Icon size={12} aria-hidden="true" className={`mt-[3px] shrink-0 ${https ? 'text-ok' : 'text-warn'}`} />
-      <span className="min-w-0 break-all font-semibold text-text-strong" data-testid="quick-ask-origin-text">{ask.origin}</span>
+      <span className="min-w-0 break-all font-semibold text-text-strong" data-testid="quick-ask-origin-text">
+        {ask.top_origin ? i18nT('pages.chat.quickAsk.origin_inside', { origin: ask.origin, top: ask.top_origin }) : ask.origin}
+      </span>
       <InfoTip text={i18nT('pages.chat.quickAsk.origin_tip')} />
     </div>
   )
@@ -103,9 +105,19 @@ export function QuickAskTargetRing({ ask, dim }: { ask: QuickAsk; dim?: boolean 
   )
 }
 
-/** The widget a human check hands over, if the ask names one. */
+/** The widget a human check hands over, or the form a sign-in takeover zooms on. */
 export function widgetField(ask: QuickAsk): QuickAskField | null {
-  return ask.fields.find(f => f.role === 'widget') ?? null
+  return ask.fields.find(f => f.role === 'widget' || f.role === 'region') ?? null
+}
+
+/** Credentials with no field bound: the person signs in on the page themselves. */
+export function isSignInTakeover(ask: QuickAsk): boolean {
+  return ask.kind === 'credentials' && !ask.fields.some(f => f.role === 'password')
+}
+
+/** The ask is answered by the person's own hands on the page. */
+export function takesOver(ask: QuickAsk): boolean {
+  return ask.kind === 'human_check' || isSignInTakeover(ask)
 }
 
 /** Most a scoped takeover zooms in; past this a small box turns to mush. */
@@ -117,7 +129,7 @@ const ZOOM_MAX = 3
  * clicks still land in frame pixels. Null when there is nothing to zoom to.
  */
 export function zoomStyle(ask: QuickAsk | null): CSSProperties | null {
-  if (!ask || ask.kind !== 'human_check' || ask.phase !== 'taken_over') return null
+  if (!ask || !takesOver(ask) || ask.phase !== 'taken_over') return null
   const w = widgetField(ask)
   if (!w || w.rect.w <= 0 || w.rect.h <= 0) return null
   const scale = Math.max(1, Math.min(ZOOM_MAX, ask.frame.w / (w.rect.w * 1.6), ask.frame.h / (w.rect.h * 1.6)))

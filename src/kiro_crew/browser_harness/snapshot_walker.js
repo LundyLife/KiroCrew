@@ -28,6 +28,8 @@
   // characters, so a snapshot past NODE_CAP nodes carries nothing it would show.
   var CONSOLE_TEXT_CAP = 2000;
   var NODE_CAP = 1500;
+  // Cross-origin frames one snapshot hands the gateway to read (ops.py FRAME_READ_CAP).
+  var FRAME_SLOT_CAP = 8;
   var INTERACTIVE_TAGS = { a: true, button: true, input: true, select: true, textarea: true };
   var INTERACTIVE_ROLES = {
     button: 1, link: 1, checkbox: 1, radio: 1, tab: 1, menuitem: 1, option: 1,
@@ -129,11 +131,43 @@
     );
   }
 
+  // A same-origin frame's document, or null (a cross-origin frame, or not a frame).
+  // The snapshot walks into the first; the gateway reads the second through its
+  // own CDP session (`browser_harness/frames.py`).
+  function frameDoc(el) {
+    var tag = (el && el.tagName || "").toLowerCase();
+    if (tag !== "iframe" && tag !== "frame") return null;
+    try { return el.contentDocument || null; } catch (e) { return null; }
+  }
+
+  function isFrame(el) {
+    var tag = (el && el.tagName || "").toLowerCase();
+    return tag === "iframe" || tag === "frame";
+  }
+
+  // From an element's own document to this one's viewport: the content boxes of
+  // the same-origin frames it sits in, so a ref inside one is clicked where it is.
+  function docOffset(el) {
+    var x = 0, y = 0, doc = el.ownerDocument, guard = 0;
+    while (doc && doc !== document && guard++ < 8) {
+      var fe = null;
+      try { fe = doc.defaultView && doc.defaultView.frameElement; } catch (e) { fe = null; }
+      if (!fe) break;
+      var b = fe.getBoundingClientRect();
+      var cs = fe.ownerDocument.defaultView.getComputedStyle(fe);
+      x += b.left + fe.clientLeft + (parseFloat(cs.paddingLeft) || 0);
+      y += b.top + fe.clientTop + (parseFloat(cs.paddingTop) || 0);
+      doc = fe.ownerDocument;
+    }
+    return [x, y];
+  }
+
   function labelText(el) {
+    var doc = el.ownerDocument || document;
     var lb = el.getAttribute && el.getAttribute("aria-labelledby");
     if (lb) {
       var parts = lb.split(/\s+/).map(function (id) {
-        var n = document.getElementById(id);
+        var n = doc.getElementById(id);
         return n ? (n.textContent || "").trim() : "";
       }).filter(Boolean);
       if (parts.length) return parts.join(" ");
@@ -142,7 +176,7 @@
     if (al && al.trim()) return al.trim();
     if (el.id) {
       var sel = "label[for=\"" + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + "\"]";
-      var lab = document.querySelector(sel);
+      var lab = doc.querySelector(sel);
       if (lab && (lab.textContent || "").trim()) return lab.textContent.trim();
     }
     if (el.closest) {
@@ -198,11 +232,18 @@
   // them get refs and must be judged by the same rule. Follow
   // `shadowRoot.activeElement` down as far as it goes (closed roots cannot be
   // entered and stop at the host, which the walker also never descends).
+  //
+  // Same-origin frames are followed the same way (their fields get refs too). A
+  // cross-origin frame stops at its <iframe>: `activeField` says so, and the
+  // gateway asks that frame itself.
   function deepActive() {
     var a = document.activeElement;
     var guard = 0;
-    while (a && a.shadowRoot && a.shadowRoot.activeElement && guard++ < 32) {
-      a = a.shadowRoot.activeElement;
+    while (a && guard++ < 32) {
+      if (a.shadowRoot && a.shadowRoot.activeElement) { a = a.shadowRoot.activeElement; continue; }
+      var inner = frameDoc(a);
+      if (inner && inner.activeElement && inner.activeElement !== inner.body) { a = inner.activeElement; continue; }
+      break;
     }
     return a;
   }
@@ -422,8 +463,14 @@
   }
 
   var api = {
-    snapshot: function () {
+    // `cap`: the node budget left (the gateway walks cross-origin frames after this
+    // document and hands each the rest). Same-origin frames are walked in place;
+    // each cross-origin one is a `slot` node the gateway fills in.
+    snapshot: function (cap) {
       installConsoleHook();
+      var limit = (typeof cap === "number" && cap >= 0) ? Math.min(cap, NODE_CAP) : NODE_CAP;
+      var slots = [];
+      window.__kcFrameSlots = slots;
       var out = [];
       function emit(el, depth) {
         var role = roleFor(el);
@@ -439,27 +486,39 @@
         return depth;
       }
       var truncated = false;
-      function walk(root, depth) {
+      function walk(root, depth, frames) {
         var kids = root.children || [];
         for (var i = 0; i < kids.length; i++) {
-          if (out.length >= NODE_CAP) { truncated = true; return; }
+          if (out.length >= limit) { truncated = true; return; }
           var el = kids[i];
           if (!el || el.nodeType !== 1) continue;
           var tag = el.tagName.toLowerCase();
           if (tag === "script" || tag === "style" || tag === "noscript" || tag === "template" || tag === "head") continue;
           if (!visible(el)) continue;
+          if (isFrame(el)) {
+            var title = (el.getAttribute("title") || el.getAttribute("name") || "").trim().slice(0, NAME_CAP);
+            var inner = frameDoc(el);
+            if (inner && inner.body && frames < 8) {
+              out.push({ depth: depth, role: "iframe", name: title });
+              walk(inner.body, depth + 1, frames + 1);
+            } else if (!inner && slots.length < FRAME_SLOT_CAP) {
+              out.push({ depth: depth, role: "iframe", name: title, slot: slots.length });
+              slots.push(el);
+            }
+            continue;
+          }
           var next = emit(el, depth);
-          walk(el, next);
-          if (el.shadowRoot) walk(el.shadowRoot, next);
+          walk(el, next, frames);
+          if (el.shadowRoot) walk(el.shadowRoot, next, frames);
         }
       }
       try {
-        walk(document.body || document.documentElement, 0);
+        walk(document.body || document.documentElement, 0, 0);
       } catch (e) {
         return { url: location.href, title: document.title, nodes: out, error: String(e && e.message) };
       }
       var result = { url: location.href, title: document.title, nodes: out };
-      if (truncated) result.error = "page has more than " + NODE_CAP + " elements; the outline stops there";
+      if (truncated) result.error = "page has more than " + limit + " elements; the outline stops there";
       return result;
     },
 
@@ -470,10 +529,11 @@
       try { el.scrollIntoView({ block: "center", inline: "center" }); } catch (e) {}
       var r = el.getBoundingClientRect();
       if (!r || (r.width === 0 && r.height === 0)) return { ok: false, code: "ref_stale" };
+      var off = docOffset(el);
       return {
         ok: true,
-        x: r.left + r.width / 2,
-        y: r.top + r.height / 2,
+        x: off[0] + r.left + r.width / 2,
+        y: off[1] + r.top + r.height / 2,
         tag: (el.tagName || "").toLowerCase(),
         password: inputType(el) === "password"
       };
@@ -499,12 +559,20 @@
     // What holds focus now: the `type` op without a ref types into it.
     activeField: function () {
       var active = deepActive();
-      if (!active || active === document.body) return { focused: false, password: false, asked: false, tag: "" };
+      var hasFocus = !!(document.hasFocus && document.hasFocus());
+      if (!active || active === document.body) return { focused: false, password: false, asked: false, tag: "", hasFocus: hasFocus };
+      if (isFrame(active)) {
+        // Focus went into a frame: a same-origin one with nothing focused inside,
+        // or a cross-origin one this page cannot see into (the gateway asks it).
+        if (frameDoc(active)) return { focused: false, password: false, asked: false, tag: "", hasFocus: hasFocus };
+        return { focused: true, frame: true, password: false, asked: false, tag: "iframe", hasFocus: hasFocus };
+      }
       return {
         focused: true,
         password: inputType(active) === "password",
         asked: asked(active),
-        tag: (active.tagName || "").toLowerCase()
+        tag: (active.tagName || "").toLowerCase(),
+        hasFocus: hasFocus
       };
     },
 
@@ -568,10 +636,12 @@
         for (var i = 0; i < found.length; i++) if (found[i].value) n++;
         var all = root.querySelectorAll("*");
         for (var j = 0; j < all.length; j++) {
-          if (!all[j].shadowRoot) continue;
+          var inner = frameDoc(all[j]);
+          if (!all[j].shadowRoot && !inner) continue;
           // Too deep to look: count it, so the screenshot is refused, not let through.
           if (d >= 8) { n++; return; }
-          walkRoot(all[j].shadowRoot, d + 1);
+          if (all[j].shadowRoot) walkRoot(all[j].shadowRoot, d + 1);
+          if (inner) walkRoot(inner, d + 1);
         }
       }
       walkRoot(document, 0);

@@ -7,7 +7,7 @@ import { i18nT } from '../../../i18n/t'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { browserLiveStore } from '../../../hooks/useBrowserLive'
 import { askUi, useAskSurface } from './askUi'
-import { answerErrorText, QuickAskTargetRing, zoomStyle } from './QuickAskParts'
+import { answerErrorText, isSignInTakeover, originHost, QuickAskTargetRing, takesOver, zoomStyle } from './QuickAskParts'
 import QuickAskInline from './QuickAskInline'
 import QuickAskSheet from './QuickAskSheet'
 import type { QuickAsk } from './types'
@@ -19,7 +19,7 @@ export interface QuickAskSlots {
   askSlot: ReactNode
   /** The frame's zoom onto a taken-over widget, else null. */
   zoom: CSSProperties | null
-  /** A human check is taken over: the frame takes the person's input. */
+  /** A human check or a sign-in is taken over: the frame takes the person's input. */
   scoped: boolean
 }
 
@@ -35,7 +35,7 @@ export function useQuickAsk(sessionKey: string, ask: QuickAsk | null, priority: 
   const isMobile = useIsMobile()
   const view = useAskSurface(instanceId, ask?.id ?? null, priority)
   if (!ask || view === 'none') return NONE
-  if (ask.kind === 'human_check' && ask.phase === 'taken_over') {
+  if (takesOver(ask) && ask.phase === 'taken_over') {
     return { frameOverlay: null, askSlot: <QuickAskTakeoverBar key={ask.id} ask={ask} sessionKey={sessionKey} />, zoom: zoomStyle(ask), scoped: true }
   }
   const ring = <QuickAskTargetRing ask={ask} />
@@ -53,6 +53,7 @@ export function useQuickAsk(sessionKey: string, ask: QuickAsk | null, priority: 
 function QuickAskTakeoverBar({ ask, sessionKey }: { ask: QuickAsk; sessionKey: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const signIn = isSignInTakeover(ask)
   const send = async (action: 'done' | 'decline') => {
     setBusy(true)
     setError('')
@@ -62,9 +63,9 @@ function QuickAskTakeoverBar({ ask, sessionKey }: { ask: QuickAsk; sessionKey: s
     else setError(answerErrorText(r.error ?? ''))
   }
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-accent/50 bg-accent-subtle/60 px-3 py-2" role="group" aria-label={i18nT('pages.chat.quickAsk.title_human_check')} data-testid="quick-ask-takeover">
+    <div className="flex flex-wrap items-center gap-2 border-t border-accent/50 bg-accent-subtle/60 px-3 py-2" role="group" aria-label={signIn ? i18nT('pages.chat.quickAsk.title_credentials', { host: originHost(ask.origin) }) : i18nT('pages.chat.quickAsk.title_human_check')} data-testid="quick-ask-takeover">
       <ShieldCheck size={14} aria-hidden="true" className="shrink-0 text-accent" />
-      <span className="min-w-0 flex-1 text-[13px] text-text-strong">{i18nT('pages.chat.quickAsk.takeover_hint')}</span>
+      <span className="min-w-0 flex-1 text-[13px] text-text-strong">{signIn ? i18nT('pages.chat.quickAsk.sign_in_takeover_hint') : i18nT('pages.chat.quickAsk.takeover_hint')}</span>
       <Btn type="button" onClick={() => { void send('decline') }} disabled={busy} data-testid="quick-ask-decline">{i18nT('pages.chat.quickAsk.decline')}</Btn>
       <Btn primary type="button" onClick={() => { void send('done') }} disabled={busy} data-testid="quick-ask-done">{i18nT('pages.chat.quickAsk.done')}</Btn>
       <ErrorNotice variant="inline" message={error} className="basis-full" askAgent testId="quick-ask-error" />

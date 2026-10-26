@@ -174,7 +174,8 @@ def schemas() -> list[dict[str, Any]]:
                 "user watches it live in the chat. `op` is the action and `args` its "
                 "parameters. navigate {url}; snapshot (the page as an outline with "
                 "element refs; call it before click/type and again after the page "
-                "changes); click {ref | x,y, button?, clicks?: 1|2}; type {ref?, text, "
+                "changes; elements inside a cross-origin iframe carry refs like f1e3 and "
+                "work like any ref); click {ref | x,y, button?, clicks?: 1|2}; type {ref?, text, "
                 "submit?} (a password field is refused: the user signs in by taking "
                 "over); press_key {key, modifiers?}; hover {ref | x,y}; drag {ref|x,y "
                 "-> to_ref|to_x,to_y}; scroll {ref|x,y?, dx?, dy?}; select_option "
@@ -227,7 +228,10 @@ def schemas() -> list[dict[str, Any]]:
                 "summary?} asks the user to do one thing on the page you must not "
                 "do yourself; they answer on the live card and it waits up to 10 "
                 "minutes. kind: credentials (targets username=ref optional, "
-                "password=ref) to sign in; text (text=ref, label: name|email|"
+                "password=ref) to sign in -- the fields may be inside an iframe (refs "
+                "f<n>e<n>); if the snapshot has no ref for them (an iframe marked "
+                "'not read'), send credentials with NO targets and the user signs in "
+                "on the page themselves; text (text=ref, label: name|email|"
                 "username|phone|other) for a personal detail you do not know; otp "
                 "(otp=ref, digits) for a one-time code; human_check (widget=ref) for "
                 "a CAPTCHA or 'I'm not a robot' box, which you never solve or click "
@@ -364,7 +368,9 @@ def _result_text(op: str, result: Any) -> str:
         )
         outline = str(result.get("snapshot", ""))
         partial = f"\n(partial: {result['partial']})" if result.get("partial") else ""
-        return _redacted(f"{head}{partial}\n{outline}")[:_RESULT_CAP]
+        # The gateway's own fixed text (ops.py), never page content.
+        note = f"\n(note: {result['note']})" if isinstance(result.get("note"), str) else ""
+        return _redacted(f"{head}{partial}{note}\n{outline}")[:_RESULT_CAP]
     fields = {k: v for k, v in result.items() if k != "ok" and v is not None}
     if not fields:
         return f"Browser {op}: ok"
@@ -599,7 +605,8 @@ _ASK_OUTCOME_TEXT = {
     "filled": "the user filled it in on the page; what they typed is not shown to you. "
     "Continue (submit the form if that is the next step).",
     "declined": "the user declined. Do not ask for the same thing again this turn.",
-    "passed": "the user finished the check. Take a snapshot and continue.",
+    "passed": "the user finished it on the page themselves (the check, or the sign-in). "
+    "Take a snapshot and continue.",
     "confirmed": "the user confirmed and the button was clicked once. Take a snapshot.",
     "cancelled": "the user dismissed the ask, or the turn moved on. Nothing was entered.",
     "origin_changed": "the page changed under the ask, so the answer may not have landed "

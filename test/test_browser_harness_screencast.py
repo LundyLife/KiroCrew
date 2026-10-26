@@ -242,7 +242,11 @@ async def test_start_attaches_a_relay_session_and_starts_at_the_top_rung() -> No
     await stream.start()
     assert relay.attached == ["target-1"] and stream.session_id == SESSION
     assert relay.calls[0] == ("Page.enable", {}, SESSION)
+    # The tab's cross-origin iframes attach to this session too (browser_harness.frames).
     method, params, sid = relay.calls[1]
+    assert (method, sid) == ("Target.setAutoAttach", SESSION)
+    assert params["flatten"] is True and params["waitForDebuggerOnStart"] is False
+    method, params, sid = relay.calls[2]
     assert method == "Page.startScreencast" and sid == SESSION
     assert params == {
         "format": "jpeg",
@@ -669,3 +673,45 @@ async def test_no_settle_while_hidden_or_before_any_frame() -> None:
     await stream.set_visible(False)
     clock.now += 5
     assert await stream.settle() is False
+
+
+# ── cross-origin iframes ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_password_boxes_inside_a_cross_origin_frame_are_masked_on_the_live_frame() -> None:
+    """The top query cannot see into an out-of-process iframe: the frame's own session
+    is asked, and its boxes move by the owner's content box (measured by the browser)."""
+    stream, relay, _clock, sink = make_stream()
+    child = "CHILD"
+    top_answer = {"result": {"value": {"boxes": [], "frames": [[100, 200, 400, 300]], "partial": False}}}
+    child_answer = {"result": {"value": {"boxes": [[20, 80, 300, 30]], "frames": [], "partial": False}}}
+    real_send = relay.send
+
+    async def send(method: str, params: Any = None, session_id: Any = None) -> Any:
+        if session_id == child and method == "Runtime.evaluate":
+            relay.calls.append((method, dict(params or {}), session_id))
+            expr = params["expression"]
+            return {"result": {"value": 400}} if expr == "innerWidth" else child_answer
+        if method == "Runtime.evaluate":
+            relay.calls.append((method, dict(params or {}), session_id))
+            return top_answer
+        return await real_send(method, params, session_id)
+
+    relay.send = send  # type: ignore[method-assign]
+    relay.answers["DOM.getFrameOwner"] = {"backendNodeId": 9}
+    relay.answers["DOM.getBoxModel"] = {
+        "model": {"content": [100, 200, 500, 200, 500, 500, 100, 500]}
+    }
+    await stream.start()
+    await stream._on_event(
+        {
+            "method": "Target.attachedToTarget",
+            "sessionId": SESSION,
+            "params": {"sessionId": child, "targetInfo": {"targetId": "F2", "type": "iframe"}},
+        }
+    )
+    assert stream.frames.frames() == [("F2", child)]
+    await relay.on_event(frame_event(make_jpeg(1280, 768)))
+    header, _ = sink.frames[-1]
+    assert header["mask"] == [[120, 280, 301, 31]]

@@ -54,6 +54,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from kiro_crew.browser_harness.frames import FrameOps, FrameRegistry, enable_auto_attach
+
 logger = logging.getLogger(__name__)
 
 #: ``type`` of the JSON header that precedes every binary frame on the owner websocket.
@@ -712,6 +714,9 @@ class LiveStream:
         if remembered is not None:
             self.controller.restore(*remembered)
         self.session_id = ""
+        #: The tab's cross-origin iframes, each on a child session of ours
+        #: (``browser_harness.frames``): the mask, the snapshot and quick asks read them.
+        self.frames = FrameRegistry()
         #: Names this stream on every frame header; the card scopes acks to it.
         self.stream_id = secrets.token_hex(4)
         #: Frame pixels per viewport CSS pixel of the last frame (1.0 until one lands).
@@ -781,8 +786,13 @@ class LiveStream:
         if self.running:
             return
         self.session_id = await self.relay.attach(self.target_id, self._on_event)
+        self.frames.parent = self.session_id
         self.running = True
         await self.relay.send("Page.enable", {}, self.session_id)
+        try:
+            await enable_auto_attach(self.relay, self.session_id)
+        except Exception:  # noqa: BLE001 - the stream runs without frame access
+            logger.debug("live stream: frame auto-attach not enabled", exc_info=True)
         if self.visible or self._casts_hidden:
             await self._start_cast()
         if self._auto_control:
@@ -912,7 +922,10 @@ class LiveStream:
     # ── frames ─────────────────────────────────────────────────────────────
 
     async def _on_event(self, msg: dict[str, Any]) -> None:
+        self.frames.handle(msg)
         if msg.get("method") != "Page.screencastFrame" or not self.running:
+            return
+        if msg.get("sessionId") not in (None, self.session_id):
             return
         params = msg.get("params") or {}
         async with self._frame_lock:
@@ -1173,6 +1186,7 @@ class LiveStream:
             return clip_mask_rects(
                 self._mask_boxes, self.scale, width, height, limit=MASK_BOX_LIMIT
             )
+        boxes = boxes + await self._frame_boxes()
         self._mask_boxes = boxes
         rects = clip_mask_rects(boxes, self.scale, width, height, limit=MASK_BOX_LIMIT)
         partial = isinstance(value, dict) and bool(value.get("partial"))
@@ -1188,6 +1202,34 @@ class LiveStream:
                 self._rec_last = list(self._rec_boxes)
                 self._rec_last_size = (width, height)
         return list(rects)
+
+    async def _frame_boxes(self) -> list[Any]:
+        """Secret-field boxes inside the tab's cross-origin iframes, in page CSS pixels.
+
+        Each frame is asked with the same query in its own session and its boxes are
+        moved by its owner's content box. A frame that cannot be placed exactly adds
+        none: its whole box is already among the opaque ``frames`` the replay paints.
+        """
+        out: list[Any] = []
+        place = FrameOps(self.relay, self.session_id, self.frames, "")
+        for frame_id, sid in self.frames.frames():
+            try:
+                reply = await self.relay.send(
+                    "Runtime.evaluate", {"expression": _MASK_JS, "returnByValue": True}, sid
+                )
+            except Exception:  # noqa: BLE001 - the frame went away
+                continue
+            value = (reply.get("result") or {}).get("value") if isinstance(reply, dict) else None
+            boxes = value.get("boxes") if isinstance(value, dict) else None
+            if not isinstance(boxes, list) or not boxes:
+                continue
+            at = await place.owner_origin_box(frame_id, sid)
+            if at is None:
+                continue
+            for b in boxes:
+                if isinstance(b, list) and len(b) == 4:
+                    out.append([float(b[0]) + at[0], float(b[1]) + at[1], b[2], b[3]])
+        return out
 
     # ── control ────────────────────────────────────────────────────────────
 
