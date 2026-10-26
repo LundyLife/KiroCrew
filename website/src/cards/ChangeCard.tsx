@@ -26,6 +26,7 @@ import { runCardPlan, userFields } from './runPlan'
 import { problemFrom, problemText, wantsRefresh, type CardProblem } from './refusals'
 import { useCardCorners } from './cardCorners'
 import { useCardAuthor } from './cardAuthor'
+import { useMeasuredHeight } from '../hooks/useMeasuredHeight'
 import { MEMBER_GOALS_QUERY_PREFIX, MEMBERS_ROSTER_QUERY_KEY } from '../api/membersQuery'
 
 const GOALS_CARD_KINDS = new Set(['crewmate.goal', 'crewmate.key_results', 'crewmate.check_ins'])
@@ -76,6 +77,7 @@ export default function ChangeCard({ card, store, refresh, remove }: ChangeCardP
   const headingId = useId()
   const rootRef = useRef<HTMLElement>(null)
   const lineRef = useRef<HTMLDivElement>(null)
+  const [contentRef, contentHeight] = useMeasuredHeight<HTMLDivElement>({ ignoreTransforms: true })
   const [running, setRunning] = useState<null | 'apply' | 'undo'>(null)
   const [problem, setProblem] = useState<CardProblem | null>(null)
   // The stored error the user closed (by content, since a refetch rebuilds it).
@@ -254,17 +256,26 @@ export default function ChangeCard({ card, store, refresh, remove }: ChangeCardP
   const title = cardTitle(card)
 
   return (
-    <motion.section
+    <section
       ref={rootRef}
-      // Size only: a scroll moves the card inside the virtual list, and
-      // animating that position change would make it jitter.
-      layout={reduce ? false : 'size'}
-      transition={reduce ? { duration: 0 } : { duration: 0.2 }}
       aria-labelledby={headingId}
       data-testid="change-card"
       data-card-status={card.status}
       className={`@container ${corners} border border-border bg-card text-card-fg`}
     >
+      {/* The card's real height animates, measured from its content: a
+          `layout` size animation is a scale transform, which stretched the
+          result line while the rows below had already jumped up under the
+          still-tall box. The clip keeps a growing body inside the box for the
+          frame before its new height is measured; every child keeps its focus
+          ring inside its own padding, so nothing is cut at rest. */}
+      <motion.div
+        initial={false}
+        animate={{ height: contentHeight > 0 ? contentHeight : 'auto' }}
+        transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+        className="overflow-hidden"
+      >
+      <div ref={contentRef}>
       {finished ? (
         <CardResultLine
           ref={lineRef}
@@ -432,6 +443,8 @@ export default function ChangeCard({ card, store, refresh, remove }: ChangeCardP
           </div>
         </div>
       )}
-    </motion.section>
+      </div>
+      </motion.div>
+    </section>
   )
 }

@@ -24,6 +24,7 @@ import { useGuide } from './GuideContext'
 import { resolveGuideActions } from './guideActions'
 import { useCardCorners } from '../cards/cardCorners'
 import GuideMateNote from './GuideMateNote'
+import { useMeasuredHeight } from '../hooks/useMeasuredHeight'
 
 /** How a guide's end reads, by terminal status; shared with GuideLayer's finish chip. */
 export const FINISHED_KEYS: Record<string, string> = {
@@ -144,6 +145,7 @@ export default function GuideOfferCard({ guideId, slotKey, recordedStatus = null
   const lineRef = useRef<HTMLElement>(null)
   const acted = useRef(false)
   const [cardRef, newerCardFollows] = useLaterGuideCard()
+  const [contentRef, contentHeight] = useMeasuredHeight<HTMLDivElement>({ ignoreTransforms: true })
 
   const live = (slotKey && ctx?.guides.find(g => g.guide_id === guideId && g.slot_key === slotKey)) || null
   const offered = live?.status === 'offered' ? live : null
@@ -230,18 +232,23 @@ export default function GuideOfferCard({ guideId, slotKey, recordedStatus = null
   const action = resolved && resolved.ok ? resolved.actions[offered!.action_index] ?? resolved.actions[0] : null
   return (
     <div ref={cardRef} className="flex flex-col gap-2" data-testid="guide-offer-cards">
-      <motion.section
+      <section
         ref={rootRef}
-        // Size only: a scroll moves the card inside the virtual list, and
-        // animating that position change would make it jitter.
-        layout={reduce ? false : 'size'}
-        transition={reduce ? { duration: 0 } : { duration: 0.2 }}
         aria-labelledby={headingId}
         data-testid="guide-offer-card"
         data-guide-status="offered"
         className={`@container ${corners} border border-border bg-card text-card-fg`}
       >
-        <div className="px-4 py-3">
+        {/* The card's real height animates, measured from its content, as the
+            change card's does: a `layout` size animation is a scale transform,
+            which stretches the text when the error notice grows the card. */}
+        <motion.div
+          initial={false}
+          animate={{ height: contentHeight > 0 ? contentHeight : 'auto' }}
+          transition={reduce ? { duration: 0 } : { duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+          className="overflow-hidden"
+        >
+        <div ref={contentRef} className="px-4 py-3">
           {/* One row: the offer on the left, its two buttons on the right;
               a narrow card wraps the buttons under the text. */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -270,7 +277,8 @@ export default function GuideOfferCard({ guideId, slotKey, recordedStatus = null
           {/* No hand-off: the card sits beside a chat draft the hand-off navigation would discard. */}
           <ErrorNotice className="mt-2" variant="inline" testId="guide-offer-error" message={acted.current ? ctx.error : ''} />
         </div>
-      </motion.section>
+        </motion.div>
+      </section>
     </div>
   )
 }

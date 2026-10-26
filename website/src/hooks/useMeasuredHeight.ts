@@ -37,22 +37,38 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * the observer dead after the first render and the height frozen at its mount
  * value (the list dock stayed at its search-row height while an error notice
  * grew it). The effect therefore re-attaches to the node it still holds.
+ *
+ * `ignoreTransforms` measures the element's own layout height instead: the
+ * ResizeObserver's border box, and `offsetHeight` for the first read. A caller
+ * that sets the measured value back as a CSS height needs it, because a
+ * transformed ancestor (a dialog scaling in) shrinks the bounding rect, and
+ * that ancestor's transform finishing resizes nothing, so no observer fires to
+ * correct the undersized height.
  */
-export function useMeasuredHeight<T extends HTMLElement>(): [(node: T | null) => void, number] {
+export function useMeasuredHeight<T extends HTMLElement>(
+  { ignoreTransforms = false }: { ignoreTransforms?: boolean } = {},
+): [(node: T | null) => void, number] {
   const [height, setHeight] = useState(0)
   const nodeRef = useRef<T | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
+
+  const read = useCallback((node: Element, entry?: ResizeObserverEntry) => {
+    if (!ignoreTransforms) return node.getBoundingClientRect().height
+    const box = entry?.borderBoxSize?.[0]
+    if (box) return box.blockSize
+    return node instanceof HTMLElement ? node.offsetHeight : node.getBoundingClientRect().height
+  }, [ignoreTransforms])
 
   const observe = useCallback((node: T) => {
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) {
-        setHeight(entry.target.getBoundingClientRect().height)
+        setHeight(read(entry.target, entry))
       }
     })
     observer.observe(node)
     observerRef.current = observer
-  }, [])
+  }, [read])
 
   const measuredRef = useCallback((node: T | null) => {
     observerRef.current?.disconnect()
@@ -62,9 +78,9 @@ export function useMeasuredHeight<T extends HTMLElement>(): [(node: T | null) =>
       setHeight(0)
       return
     }
-    setHeight(node.getBoundingClientRect().height)
+    setHeight(read(node))
     observe(node)
-  }, [observe])
+  }, [observe, read])
 
   useEffect(() => {
     if (nodeRef.current && !observerRef.current) observe(nodeRef.current)
