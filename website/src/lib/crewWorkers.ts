@@ -66,6 +66,37 @@ export function groupCrewWorkers(workers: CrewWorker[]): { group: CrewWorkerGrou
     .filter(g => g.workers.length > 0)
 }
 
+/** A worker's dispatcher when that is not the root: a sub-conductor's key, or "". */
+export function crewSubDispatcher(worker: CrewWorker, root: string): string {
+  const by = worker.dispatched_by || ''
+  return by && by !== root && by !== worker.key ? by : ''
+}
+
+/** One group's rows with each sub-conductor's crew right under it, when both are
+ *  in the group; any other row keeps the server's order. Cycle safe. */
+export function orderUnderDispatcher(rows: CrewWorker[], root: string): CrewWorker[] {
+  const here = new Set(rows.map(w => w.key))
+  const children = new Map<string, CrewWorker[]>()
+  const tops: CrewWorker[] = []
+  for (const w of rows) {
+    const by = crewSubDispatcher(w, root)
+    if (by && here.has(by)) children.set(by, [...(children.get(by) ?? []), w])
+    else tops.push(w)
+  }
+  const out: CrewWorker[] = []
+  const seen = new Set<string>()
+  const visit = (w: CrewWorker) => {
+    if (seen.has(w.key)) return
+    seen.add(w.key)
+    out.push(w)
+    for (const c of children.get(w.key) ?? []) visit(c)
+  }
+  tops.forEach(visit)
+  // A cycle among dispatchers leaves rows no top reaches: keep them, in order.
+  for (const w of rows) if (!seen.has(w.key)) visit(w)
+  return out
+}
+
 export interface CrewRootSummary {
   /** One entry per worker, approval first, for the row's ghost stack. */
   groups: CrewWorkerGroup[]

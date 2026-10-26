@@ -167,6 +167,7 @@
     "workers_loading": "Loading the crew…",
     "worker_reopen": "Reopen {{title}} to read it",
     "worker_reopen_failed": "Could not reopen that session. Try again.",
+    "worker_dispatched_by": "From {{name}}",
     "crew_approval_waiting": "Crew members waiting for a tool decision: {{count}}",
     "crew_approval_on_card": "Decide it on the approval card in {{name}}.",
     "open_approval_card": "Open the approval card"

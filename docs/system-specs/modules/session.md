@@ -582,7 +582,9 @@ Crew Mode item is a gradient chip when on, and one line under the filters says
 workers and their folders stay out of the list. The side panel gets a **Workers**
 tab (`ViewKind` `workers`, zh-CN "成员") opened beside the board when Crew Mode is
 turned on: cards grouped Approval needed, Working, Waiting on conductor, Waiting,
-Done with counts, the worker on screen marked, a loading line while the first read
+Done with counts (a sub-conductor's crew one indent step in, with a "From
+<dispatcher>" note naming its direct dispatcher, `dispatched_by` on each
+`crew-workers` row, `crew_mode.DISPATCHER_FIELD`), the worker on screen marked, a loading line while the first read
 is in flight, and a "Projects tab · coming soon" footer. A closed worker's card
 and timeline lane reopen it from its saved transcript (`reopenCrewWorker`, the
 History resume), listed under its root again. A **List | Timeline**
@@ -685,7 +687,9 @@ agent fills with markdown instead of HTML (no element tag in its body) renders
 as that markdown under its title rather than as raw text in the frame. A card opens the
 worker in the MAIN pane like any session with the Workers tab in front of its
 panel; on a phone the panel sheet closes. The worker view's header is a
-breadcrumb (`CrewWorkerBreadcrumb`: ghost, root title, worker, status) with
+breadcrumb (`CrewWorkerBreadcrumb`: ghost, root title, worker, status; for a worker a
+sub-conductor dispatched, root title › sub-conductor › worker, the crumbs above the
+worker being buttons that open those sessions and the middle one truncating first) with
 "Back to main chat" (with the root's tab closed: its saved title and the worker's
 real group, both read from saved data by the worker list, which answers a closed
 root with `root_closed: true` and `root_title`; a line saying the conductor is

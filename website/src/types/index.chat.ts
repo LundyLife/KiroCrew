@@ -661,6 +661,9 @@ export interface CrewWorker {
   summary?: string
   /** The session that dispatched it: the root itself or another worker. */
   created_by: string
+  /** Its direct dispatcher by the lineage the server walks (the parent edge,
+   *  `created_by`, the saved creator): the root, a sub-conductor's key, or "". */
+  dispatched_by?: string
 }
 
 /** One bar on a Crew Mode timeline lane, from recorded transcript rows only. */

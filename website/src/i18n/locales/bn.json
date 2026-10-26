@@ -167,6 +167,7 @@
     "workers_loading": "দল লোড হচ্ছে…",
     "worker_reopen": "পড়তে {{title}} আবার খুলুন",
     "worker_reopen_failed": "সেশনটি আবার খোলা যায়নি। আবার চেষ্টা করুন।",
+    "worker_dispatched_by": "{{name}} থেকে",
     "crew_approval_waiting": "টুলের সিদ্ধান্তের অপেক্ষায় দলের সদস্য: {{count}}",
     "crew_approval_on_card": "{{name}}-এর অনুমোদন কার্ডে সিদ্ধান্ত নিন।",
     "open_approval_card": "অনুমোদন কার্ড খুলুন"

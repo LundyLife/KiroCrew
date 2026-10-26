@@ -185,6 +185,7 @@
     "workers_loading": "Загрузка команды…",
     "worker_reopen": "Открыть {{title}} снова для чтения",
     "worker_reopen_failed": "Не удалось снова открыть сеанс. Попробуйте ещё раз.",
+    "worker_dispatched_by": "От {{name}}",
     "crew_approval_waiting": "Участники команды ждут решения по инструменту: {{count}}",
     "crew_approval_on_card": "Решите на карточке одобрения в {{name}}.",
     "open_approval_card": "Открыть карточку одобрения"

@@ -176,6 +176,7 @@
     "workers_loading": "Caricamento della squadra…",
     "worker_reopen": "Riapri {{title}} per leggerlo",
     "worker_reopen_failed": "Impossibile riaprire la sessione. Riprova.",
+    "worker_dispatched_by": "Da {{name}}",
     "crew_approval_waiting": "Membri della squadra in attesa di una decisione su uno strumento: {{count}}",
     "crew_approval_on_card": "Decidi sulla scheda di approvazione in {{name}}.",
     "open_approval_card": "Apri la scheda di approvazione"

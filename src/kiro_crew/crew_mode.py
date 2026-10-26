@@ -84,6 +84,10 @@ CONDUCTOR_ALIASES: Final[dict[str, str]] = {
 #: root; ``crew_root`` is the root's slot key on each of its workers, absent elsewhere.
 ROOT_FIELD: Final[str] = "crew_mode_root"
 WORKER_FIELD: Final[str] = "crew_root"
+#: On a worker row: the session that dispatched it directly, the same creator the
+#: root walk starts from (the ``parent`` edge, ``created_by``, the saved creator).
+#: Equal to the root for its own crew; a sub-conductor's key for that one's crew.
+DISPATCHER_FIELD: Final[str] = "crew_dispatched_by"
 
 #: The last ``agent.crew_mode_agent`` an explicit config read saw (:func:`remember`):
 #: the agent catalog and the agent switch pass the config
@@ -411,14 +415,17 @@ def stamp_rows(
     for key, row in by_key.items():
         row[ROOT_FIELD] = key in roots
         row.pop(WORKER_FIELD, None)
+        row.pop(DISPATCHER_FIELD, None)
         if key in roots:
             continue
         seen = {key}
         current: Mapping[str, Any] | None = row
         creator = creator_of(key, row)
+        direct = creator
         while creator and creator not in seen:
             if creator in roots or creator in closed_roots:
                 row[WORKER_FIELD] = creator
+                row[DISPATCHER_FIELD] = direct
                 break
             seen.add(creator)
             above = by_key.get(creator)

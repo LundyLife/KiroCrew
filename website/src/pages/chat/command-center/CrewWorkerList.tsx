@@ -10,7 +10,7 @@ import { closeActivityPanel, openActivityPanel, resumeFromHistory, switchSlot } 
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { openPanelView } from '../../../hooks/usePanelTabs'
 import { CrewStatusDot } from '../../../components/crew/CrewModeMarks'
-import { CREW_GROUP_LABEL_KEY, crewWorkerGroup, groupCrewWorkers } from '../../../lib/crewWorkers'
+import { CREW_GROUP_LABEL_KEY, crewSubDispatcher, crewWorkerGroup, groupCrewWorkers, orderUnderDispatcher } from '../../../lib/crewWorkers'
 import CrewTimeline from './CrewTimeline'
 
 /** The status labels, keyed by the wire value `GET .../crew-workers` sends. */
@@ -134,7 +134,11 @@ export default function CrewWorkerList({ root, viewing, active }: {
   const showTimeline = view === 'timeline' && !isMobile
   // Read only while the cards are on screen: the timeline has its own read.
   const workers = useCrewWorkers(root, active && !showTimeline)
-  const groups = groupCrewWorkers(workers.data?.workers ?? [])
+  const all = workers.data?.workers ?? []
+  const groups = groupCrewWorkers(all)
+  // A sub-conductor's crew: one indent step and a "from <dispatcher>" note,
+  // whatever the depth. The note names it for readers too, not the indent alone.
+  const titleOf = (key: string) => all.find(w => w.key === key)?.title || t('commandCenter.worker_untitled')
   return <div className="h-full flex flex-col min-w-0" data-testid="crew-worker-list">
     {!isMobile && <CrewViewSwitch view={view} onChange={setView} />}
     {showTimeline
@@ -153,7 +157,10 @@ export default function CrewWorkerList({ root, viewing, active }: {
             {t(CREW_GROUP_LABEL_KEY[group])} · {rows.length}
           </h3>
           <ul className="space-y-2">
-            {rows.map(w => <CrewWorkerCard key={w.key} worker={w} current={w.key === viewing} onOpen={() => open(w.key, w.title, w.status === 'closed')} />)}
+            {orderUnderDispatcher(rows, root).map(w => {
+              const by = crewSubDispatcher(w, root)
+              return <CrewWorkerCard key={w.key} worker={w} current={w.key === viewing} from={by ? titleOf(by) : ''} onOpen={() => open(w.key, w.title, w.status === 'closed')} />
+            })}
           </ul>
         </section>
       ))}
@@ -182,7 +189,7 @@ function CrewViewSwitch({ view, onChange }: { view: 'list' | 'timeline'; onChang
   </div>
 }
 
-function CrewWorkerCard({ worker, current, onOpen }: { worker: CrewWorker; current: boolean; onOpen: () => void }) {
+function CrewWorkerCard({ worker, current, from, onOpen }: { worker: CrewWorker; current: boolean; from: string; onOpen: () => void }) {
   const { t } = useTranslation()
   const closed = worker.status === 'closed'
   const title = worker.title || t('commandCenter.worker_untitled')
@@ -194,14 +201,15 @@ function CrewWorkerCard({ worker, current, onOpen }: { worker: CrewWorker; curre
       <span className="font-medium text-text truncate">{title}</span>
       <span className="ml-auto"><CrewStatusDot group={crewWorkerGroup(worker)} /></span>
     </span>
+    {from && <span className="block text-[11px] text-muted truncate" data-testid="crew-worker-from">{t('commandCenter.worker_dispatched_by', { name: from })}</span>}
     {worker.summary && <span className="block text-[12px] text-text/80 truncate mt-0.5" data-testid="crew-worker-summary">{worker.summary}</span>}
     {meta && <span className="block text-[12px] text-muted truncate mt-0.5">{meta}</span>}
   </>
   const cls = `block w-full text-left rounded-lg border px-3 py-2.5 text-sm transition-colors ${current ? 'crew-card' : 'border-border bg-bg-elevated/40 hover:bg-bg-hover'}`
   // A closed worker opens too: from its saved transcript, under this root.
-  return <li data-testid="crew-worker-row" data-worker={worker.key}>
+  return <li data-testid="crew-worker-row" data-worker={worker.key} data-indent={from ? '1' : undefined} className={from ? 'ml-4' : undefined}>
     {closed
-      ? <button type="button" className={`${cls} cursor-pointer min-h-11`} aria-label={t('commandCenter.worker_reopen', { title })} data-testid="crew-worker-reopen" onClick={onOpen}>{body}</button>
+      ? <button type="button" className={`${cls} cursor-pointer min-h-11`} aria-label={from ? `${t('commandCenter.worker_reopen', { title })} · ${t('commandCenter.worker_dispatched_by', { name: from })}` : t('commandCenter.worker_reopen', { title })} data-testid="crew-worker-reopen" onClick={onOpen}>{body}</button>
       : <button type="button" className={`${cls} cursor-pointer min-h-11`} aria-current={current ? 'true' : undefined} onClick={onOpen}>{body}</button>}
   </li>
 }

@@ -167,6 +167,7 @@
     "workers_loading": "टीम लोड हो रही है…",
     "worker_reopen": "पढ़ने के लिए {{title}} फिर खोलें",
     "worker_reopen_failed": "वह सत्र फिर नहीं खुल सका। फिर कोशिश करें।",
+    "worker_dispatched_by": "{{name}} से",
     "crew_approval_waiting": "टूल निर्णय की प्रतीक्षा में टीम सदस्य: {{count}}",
     "crew_approval_on_card": "{{name}} के अनुमोदन कार्ड पर तय करें।",
     "open_approval_card": "अनुमोदन कार्ड खोलें"

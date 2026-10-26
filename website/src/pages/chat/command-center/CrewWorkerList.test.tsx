@@ -36,6 +36,28 @@ function renderWith(ui: React.ReactElement, slots: unknown[] = []) {
 describe('CrewWorkerList (design B)', () => {
   afterEach(() => vi.clearAllMocks())
 
+  it('C: a sub-conductor\'s crew sits one step in under it with a "from" note, at any depth', async () => {
+    const D = (key: string, title: string, by: string) => ({ ...W(key, title, 'idle', 'done'), created_by: by, dispatched_by: by })
+    api.crewWorkers.mockResolvedValue({ root: 'root-1', workers: [D('g1', 'Grandchild', 'sub'), D('top', 'Top worker', 'root-1'), D('g2', 'Great-grandchild', 'g1'), D('sub', 'Sub conductor', 'root-1')] })
+    renderWith(<CrewWorkerList root="root-1" viewing="root-1" active />)
+    await screen.findByText('Grandchild')
+    const rows = screen.getAllByTestId('crew-worker-row')
+    // The sub-conductor's crew right under it; deeper crew under its own dispatcher.
+    expect(rows.map(r => r.getAttribute('data-worker'))).toEqual(['top', 'sub', 'g1', 'g2'])
+    const byKey = Object.fromEntries(rows.map(r => [r.getAttribute('data-worker'), r]))
+    // One indent step only, and the note names the direct dispatcher.
+    expect(byKey.top).not.toHaveAttribute('data-indent')
+    expect(byKey.sub).not.toHaveAttribute('data-indent')
+    expect(byKey.g1).toHaveAttribute('data-indent', '1')
+    expect(byKey.g2).toHaveAttribute('data-indent', '1')
+    expect(byKey.g1.className).toBe(byKey.g2.className)
+    expect(within(byKey.g1).getByTestId('crew-worker-from')).toHaveTextContent('From Sub conductor')
+    expect(within(byKey.g2).getByTestId('crew-worker-from')).toHaveTextContent('From Grandchild')
+    // The note is in the button's name, so the indent is not the only signal.
+    expect(within(byKey.g1).getByRole('button')).toHaveAccessibleName(/From Sub conductor/)
+    expect(within(byKey.top).queryByTestId('crew-worker-from')).toBeNull()
+  })
+
   it('groups cards Approval needed, Working, Waiting on conductor, Waiting, Done; never Needs you', async () => {
     api.crewWorkers.mockResolvedValue(WORKERS)
     renderWith(<CrewWorkerList root="root-1" viewing="root-1" active />)

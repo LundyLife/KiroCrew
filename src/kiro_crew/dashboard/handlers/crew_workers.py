@@ -330,12 +330,14 @@ async def api_crew_workers(request: web.Request) -> web.Response:
                 "ledger_item": item,
                 "summary": _worker_line(row, line),
                 "created_by": str(row.get("created_by") or ""),
+                "dispatched_by": str(row.get(crew_mode.DISPATCHER_FIELD) or ""),
                 "approval": _approval_of(row),
             }
         )
     closed_meta = await asyncio.to_thread(
         _closed_titles, state, [*closed, root] if root_closed else closed
     )
+    parents = crew_mode.persisted_parents() if closed else {}
     for key in closed:
         item, line = items.get(key, NO_LEDGER)[:2]
         title, agent = closed_meta.get(key, ("", ""))
@@ -350,6 +352,7 @@ async def api_crew_workers(request: web.Request) -> web.Response:
                 "ledger_item": item,
                 "summary": line,
                 "created_by": "",
+                "dispatched_by": parents.get(key, "") or "",
             }
         )
     out: dict[str, Any] = {"root": root, "workers": workers}

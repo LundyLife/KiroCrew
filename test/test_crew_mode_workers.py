@@ -163,7 +163,12 @@ def test_a_root_conductor_is_a_crew_mode_root_and_its_tree_are_its_workers():
     assert rows["w1"][crew_mode.WORKER_FIELD] == "root"
     # A grandchild belongs to the same root.
     assert rows["w2"][crew_mode.WORKER_FIELD] == "root"
+    # Each worker names its direct dispatcher: the root, or the sub-conductor.
+    assert rows["w1"][crew_mode.DISPATCHER_FIELD] == "root"
+    assert rows["w2"][crew_mode.DISPATCHER_FIELD] == "w1"
     assert crew_mode.WORKER_FIELD not in rows["plain"]
+    assert crew_mode.DISPATCHER_FIELD not in rows["plain"]
+    assert crew_mode.DISPATCHER_FIELD not in rows["root"]
     assert rows["plain"][crew_mode.ROOT_FIELD] is False
 
 
@@ -605,6 +610,9 @@ async def test_the_worker_list_is_the_roots_tree_with_status_and_item(_open_gate
     # The card's one line: the task line from the ledger, else the last reply.
     assert by_key["w1"]["summary"] == "Writing the haiku"
     assert by_key["w2"]["summary"] == "Two lines done"
+    # Who dispatched whom: w2 was dispatched by the sub-conductor w1.
+    assert by_key["w1"]["dispatched_by"] == "root"
+    assert by_key["w2"]["dispatched_by"] == "w1"
 
 
 @pytest.mark.asyncio

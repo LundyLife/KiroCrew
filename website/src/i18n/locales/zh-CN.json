@@ -158,6 +158,7 @@
     "workers_loading": "正在加载团队…",
     "worker_reopen": "重新打开 {{title}} 查看",
     "worker_reopen_failed": "无法重新打开该会话。请重试。",
+    "worker_dispatched_by": "来自 {{name}}",
     "crew_approval_waiting": "等待工具决定的团队成员：{{count}}",
     "crew_approval_on_card": "请在 {{name}} 的审批卡片上决定。",
     "open_approval_card": "打开审批卡片"

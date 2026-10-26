@@ -79,3 +79,34 @@ describe('CrewWorkerBreadcrumb on a phone', () => {
     }
   })
 })
+
+describe('CrewWorkerBreadcrumb for a sub-conductor\'s crew (C)', () => {
+  it('reads main chat > sub-conductor > member, and each crumb above it opens that session', async () => {
+    mobile.value = false
+    fail.on = false
+    fail.workers = [
+      { key: 'sub', title: 'Sub conductor', agent: 'kirocrew-conductor', status: 'idle', group: 'done', last_activity: '', ledger_item: '', created_by: 'root', dispatched_by: 'root' },
+      { key: 'w1', title: 'First-week checklist', agent: 'kirocrew-worker', status: 'idle', group: 'done', last_activity: '', ledger_item: '', created_by: 'sub', dispatched_by: 'sub' },
+    ]
+    const store = createTestStore({ dashboard: { slots: [{ key: 'root', title: 'New Teammate Welcome Kit', crew_mode_root: true }, { key: 'sub', title: 'Sub conductor', crew_root: 'root' }] } } as never)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}><Provider store={store}>
+        <CrewWorkerBreadcrumb root="root" worker={{ key: 'w1', title: 'First-week checklist', running: false }} />
+      </Provider></QueryClientProvider>,
+    )
+    const via = await screen.findByTestId('crew-breadcrumb-via')
+    const crumbs = [screen.getByTestId('crew-breadcrumb-root'), via, screen.getByTestId('crew-breadcrumb-worker')]
+    expect(crumbs.map(c => c.textContent)).toEqual(['New Teammate Welcome Kit', 'Sub conductor', 'First-week checklist'])
+    // The middle crumb gives way first on a narrow header.
+    expect(via.className).toContain('shrink-[3]')
+    expect(via.tagName).toBe('BUTTON')
+    expect(screen.getByTestId('crew-breadcrumb-root').tagName).toBe('BUTTON')
+    act(() => { via.click() })
+    expect(store.getState().chat.activeSlot).toBe('sub')
+    act(() => { screen.getByTestId('crew-back-to-conductor').click() })
+    expect(store.getState().chat.activeSlot).toBe('root')
+    fail.workers = []
+    mobile.value = true
+  })
+})

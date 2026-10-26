@@ -158,6 +158,7 @@
     "workers_loading": "크루를 불러오는 중…",
     "worker_reopen": "{{title}} 다시 열어 읽기",
     "worker_reopen_failed": "세션을 다시 열지 못했습니다. 다시 시도하세요.",
+    "worker_dispatched_by": "{{name}}에서",
     "crew_approval_waiting": "도구 결정을 기다리는 크루원: {{count}}",
     "crew_approval_on_card": "{{name}}의 승인 카드에서 결정하세요.",
     "open_approval_card": "승인 카드 열기"

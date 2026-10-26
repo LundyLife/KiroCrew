@@ -176,6 +176,7 @@
     "workers_loading": "Carregando a equipe…",
     "worker_reopen": "Reabrir {{title}} para ler",
     "worker_reopen_failed": "Não foi possível reabrir a sessão. Tente de novo.",
+    "worker_dispatched_by": "De {{name}}",
     "crew_approval_waiting": "Membros da equipe aguardando uma decisão de ferramenta: {{count}}",
     "crew_approval_on_card": "Decida no cartão de aprovação em {{name}}.",
     "open_approval_card": "Abrir o cartão de aprovação"

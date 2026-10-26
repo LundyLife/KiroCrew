@@ -167,6 +167,7 @@
     "workers_loading": "Crew wird geladen…",
     "worker_reopen": "{{title}} zum Lesen wieder öffnen",
     "worker_reopen_failed": "Die Sitzung ließ sich nicht wieder öffnen. Versuche es erneut.",
+    "worker_dispatched_by": "Von {{name}}",
     "crew_approval_waiting": "Crew-Mitglieder, die auf eine Tool-Entscheidung warten: {{count}}",
     "crew_approval_on_card": "Entscheide auf der Freigabekarte in {{name}}.",
     "open_approval_card": "Freigabekarte öffnen"
