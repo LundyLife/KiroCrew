@@ -523,6 +523,21 @@ def _fresh_update_ownership(_floor_monkeypatch):
     assert not open_steps, f"the test left update steps open: {open_steps}"
 
 
+@pytest.fixture(autouse=True)
+def _krb5_keyring_check_done(_floor_monkeypatch):
+    """Mark the once-per-process KEYRING ccache check as already run, for every test.
+
+    Every spawn a test drives reaches ``env.resolve_krb5_ccname``. Left armed, the
+    first one on a worker would read the HOST's krb5 config, log a WARNING into
+    whichever test is capturing, and flip the module flag for the rest of the run,
+    so the outcome would depend on the host and on test order. Tests of the check
+    itself re-arm it through their own ``monkeypatch``.
+    """
+    from kiro_crew import env
+
+    _floor_monkeypatch.setattr(env, "_KRB5_KEYRING_CHECKED", True)
+
+
 @pytest.fixture
 def fresh_darwin_libc_handles(_floor_monkeypatch):
     """Start the test with both macOS libc handle caches unbuilt, and put them back after.
