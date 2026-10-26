@@ -1,6 +1,7 @@
 /* ── Crew Mode surfaces ──
-   One gradient ties every Crew Mode surface together: the session list's root
-   card, its "CREW MODE" eyebrow, the filter chip, the composer's Crew Mode chip
+   One gradient ties every Crew Mode surface together: the session list root
+   row's ghost badge and "CREW MODE" eyebrow (the row itself stays a plain
+   session row), the filter chip, the composer's Crew Mode chip
    and the steer composer's ring. It runs from the theme's own `--aim` (the
    crew's purple) to `--info` (its blue), so a theme that moves either token
    moves Crew Mode with it, light and dark alike. Nothing here covers other UI:
@@ -19,8 +20,8 @@
   color: transparent;
 }
 
-/* The root row: a tinted card with a border, still one list row. No glow and
-   no shadow, in any state. */
+/* The current worker in the command center's lists: a tinted card with a
+   border. No glow and no shadow. */
 .crew-card {
   background-image: linear-gradient(
     120deg,
@@ -30,10 +31,6 @@
   );
   border: 1px solid color-mix(in srgb, var(--aim) 45%, var(--border));
   border-radius: var(--radius-lg, 12px);
-}
-
-.crew-card[data-active="true"] {
-  border-color: color-mix(in srgb, var(--aim) 75%, var(--border));
 }
 
 /* The new chat's "Crew Mode" chip: a purple-to-blue tinted fill, a purple
@@ -127,8 +124,8 @@ html:root .liquid-glass.crew-chip:not(:disabled):not([aria-disabled="true"]):act
 /* Status text on a card or row: the state's hue mixed toward the theme's strongest
    text colour, which is near black on a light theme and near white on a dark one,
    so one rule darkens a light theme's yellow and lightens a dark theme's green.
-   Measured against the darkest surface each sits on (the selected crew card and
-   the selected root row, whose tint is the deepest), 12px labels stay at or above
+   Measured against the darkest surface each sits on (the command center's crew
+   card and the session list's selected row), 12px labels stay at or above
    4.5:1 in both themes; the ghosts and dots wear the same tone. `crew-tone-muted`
    is the quiet line ("Done 2/3", "Waiting"), held to the same floor. */
 .crew-tone-warn {

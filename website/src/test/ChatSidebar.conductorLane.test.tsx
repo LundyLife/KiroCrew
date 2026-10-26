@@ -210,7 +210,7 @@ afterEach(() => {
 })
 
 describe('chat sidebar — conductor lane', () => {
-  it('draws a Crew Mode root as the crew card: badge, eyebrow, worker ghosts and what needs you', async () => {
+  it('draws a Crew Mode root as a plain row with badge, eyebrow, worker ghosts and what needs you', async () => {
     const slots = [
       { key: 'k-root', title: 'Crew root', agent: 'kirocrew-conductor', messages: 1, running: false, modified: 4000, crew_mode_root: true },
       { key: 'k-w1', title: 'W1', messages: 2, running: false, modified: 3000, created_by: 'k-root', crew_root: 'k-root' },
@@ -220,7 +220,8 @@ describe('chat sidebar — conductor lane', () => {
     const { container, getByTestId, getAllByTestId } = renderSidebar(slots, [], null, {}, [], slots)
     const card = container.querySelector('[data-crew-root="true"]') as HTMLElement
     expect(card).toBeTruthy()
-    expect(card.className).toContain('crew-card')
+    // A plain session row: no tinted card frame.
+    expect(card.className).not.toContain('crew-card')
     expect(within(card).getByTestId('crew-eyebrow')).toHaveTextContent('Crew Mode')
     expect(within(card).getByTestId('crew-ghost-badge')).toBeTruthy()
     // The conductor's name is not shown: Crew Mode chooses it.
@@ -232,7 +233,7 @@ describe('chat sidebar — conductor lane', () => {
     // One "Approval needed" count for the conductor; never "Needs you" (owner decision B).
     expect(getByTestId('crew-root-summary')).toHaveTextContent('Approval needed · 1')
     expect(getByTestId('crew-root-summary')).not.toHaveTextContent('Needs you')
-    // Only the root wears the card.
+    // Only the root wears the eyebrow.
     expect(getAllByTestId('crew-eyebrow')).toHaveLength(1)
   })
 
