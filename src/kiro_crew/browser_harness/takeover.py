@@ -15,6 +15,7 @@ logs an event: keystrokes never enter a log or the transcript.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -213,6 +214,9 @@ def _int_field(event: dict[str, Any], name: str, *, lo: int, hi: int, default: i
     value = event.get(name, default)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise InputEventError("invalid_input_event", f"{name} must be a number")
+    if isinstance(value, float) and not math.isfinite(value):
+        # JSON bodies may carry NaN / Infinity; int() of those raises, not refuses.
+        raise InputEventError("invalid_input_event", f"{name} must be a finite number")
     value = int(value)
     if value < lo or value > hi:
         raise InputEventError("invalid_input_event", f"{name} out of range")

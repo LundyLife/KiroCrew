@@ -300,7 +300,7 @@ def test_the_card_frame_width_is_bounded_and_sets_the_scale() -> None:
     bare = tk.parse_input_event({"type": "mouse", "x": 1, "y": 1, "button": "left"})
     assert bare.frame_w == 0 and tk.frame_scale(bare, 1280.0, 0.625) == 0.625
     assert tk.frame_scale(ev, 0.0, 0.625) == 0.625
-    for bad in (-1, tk.MAX_COORD + 1, "640", True):
+    for bad in (-1, tk.MAX_COORD + 1, "640", True, float("nan"), float("inf")):
         with pytest.raises(tk.InputEventError):
             tk.parse_input_event({"type": "mouse", "x": 1, "y": 1, "button": "left", "w": bad})
 
