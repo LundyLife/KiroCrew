@@ -767,7 +767,7 @@ export const SessionRow = memo(function SessionRow({ view, actions }: SessionRow
                 working row's "Loop N/M" verbatim made the two rows read as
                 the same state (UX span 03f52eaca7f7); the tooltip above
                 carries the full sentence. */}
-            <span className="truncate"><span className="font-medium" style={{ color: 'var(--warn)' }}>{i18nT('pages.chatSidebar.loop_waiting_on_you')}</span><span className="text-muted"> · {goalLoop
+            <span className="truncate"><span className="font-medium crew-tone-warn">{i18nT('pages.chatSidebar.loop_waiting_on_you')}</span><span className="text-muted"> · {goalLoop
               ? (goalLoop.maxCycles > 0
                 ? i18nT('pages.chatSidebar.loop_waiting_cycle', { count: goalLoop.cycleCount, total: goalLoop.maxCycles })
                 : i18nT('pages.chatSidebar.loop_waiting_cycle_2', { count: goalLoop.cycleCount }))

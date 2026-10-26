@@ -20,7 +20,7 @@ export function CrewGhostBadge({ size = 28 }: { size?: number }) {
 /** "CREW MODE" in the crew gradient, the root row's first line. */
 export function CrewEyebrow() {
   return (
-    <span data-testid="crew-eyebrow" className="crew-grad-text font-bold uppercase tracking-[0.12em] truncate">
+    <span data-testid="crew-eyebrow" className="crew-eyebrow-text font-bold uppercase tracking-[0.12em] truncate">
       {i18nT('components.crewMode.eyebrow')}
     </span>
   )

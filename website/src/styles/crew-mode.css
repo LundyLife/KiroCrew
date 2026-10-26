@@ -20,6 +20,22 @@
   color: transparent;
 }
 
+/* The session list's "CREW MODE" eyebrow sits on a plain row. The raw stops
+   fall under 4.5:1 there (the blue on a light row, either stop on a hover or
+   selected dark row), so each stop is pulled 30% toward the strongest text
+   colour: measured >= 4.9:1 on idle, hover and selected rows in light, dark,
+   kiro-light and kiro-dark. */
+.crew-eyebrow-text {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--aim) 70%, var(--text-strong, var(--text))),
+    color-mix(in srgb, var(--info) 70%, var(--text-strong, var(--text)))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 /* The current worker in the command center's lists: a tinted card with a
    border. No glow and no shadow. */
 .crew-card {
