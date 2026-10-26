@@ -36,30 +36,44 @@
   border-color: color-mix(in srgb, var(--aim) 75%, var(--border));
 }
 
-/* The new chat's "Crew Mode" chip: the crew's purple mixed into the glass, a
-   purple edge and the gradient on the label. The label's stops are pulled
-   55/45 toward the strongest text colour, so they hold 4.5:1 on the tint at
-   rest, hover and pressed in both themes. No glow, no shadow, no motion. */
-.crew-chip {
-  --glass-tint: color-mix(in srgb, var(--aim) 12%, var(--glass-tint-step));
-  --glass-band: color-mix(in srgb, var(--aim) 12%, var(--glass-band-plain));
-  border-color: color-mix(in srgb, var(--aim) 55%, var(--border));
+/* The new chat's "Crew Mode" chip: a purple-to-blue tinted fill, a purple
+   edge and the gradient on the label. Panes are solid by default (and under
+   the glass fallbacks, liquid-glass.css), where a pane's fill and outline are
+   `!important`, so the fill and edge here are too; the keyboard ring
+   (`:focus-visible`) is left alone. On glass the lit edges take the purple.
+   The label's stops are pulled halfway toward the strongest text colour, so
+   they hold 4.5:1 on every stop of the fill at rest, hover and pressed, light
+   and dark. No glow, no shadow, no motion. */
+html:root .liquid-glass.crew-chip {
+  --glass-band: color-mix(in srgb, var(--aim) 45%, var(--glass-band-plain));
+  --glass-edge: color-mix(in srgb, var(--aim) 70%, transparent);
+  --crew-chip-mix: 22%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--aim) var(--crew-chip-mix), var(--bg-elevated)),
+    color-mix(in srgb, var(--info) var(--crew-chip-mix), var(--bg-elevated))
+  ) !important;
+  border-color: color-mix(in srgb, var(--aim) 70%, var(--border));
 }
 
-.crew-chip:not(:disabled):not([aria-disabled="true"]):hover {
-  --glass-tint: color-mix(in srgb, var(--aim) 18%, var(--glass-tint-step));
-  border-color: color-mix(in srgb, var(--aim) 80%, var(--border));
+html:root .liquid-glass.crew-chip:not(:focus-visible) {
+  outline-color: color-mix(in srgb, var(--aim) 70%, var(--border)) !important;
 }
 
-.crew-chip:not(:disabled):not([aria-disabled="true"]):active {
-  --glass-tint: color-mix(in srgb, var(--aim) 24%, var(--glass-tint-step));
+html:root .liquid-glass.crew-chip:not(:disabled):not([aria-disabled="true"]):hover {
+  --crew-chip-mix: 28%;
+  border-color: var(--aim);
+}
+
+html:root .liquid-glass.crew-chip:not(:disabled):not([aria-disabled="true"]):active {
+  --crew-chip-mix: 34%;
 }
 
 .crew-chip-text {
   background-image: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--aim) 55%, var(--text-strong, var(--text))),
-    color-mix(in srgb, var(--info) 55%, var(--text-strong, var(--text)))
+    color-mix(in srgb, var(--aim) 50%, var(--text-strong, var(--text))),
+    color-mix(in srgb, var(--info) 50%, var(--text-strong, var(--text)))
   );
   -webkit-background-clip: text;
   background-clip: text;
