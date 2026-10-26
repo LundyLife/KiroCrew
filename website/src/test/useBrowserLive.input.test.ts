@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import {
   drawnRect, keyToEvent, mapPointToFrame, modifiersOf, pointerToEvent, wheelToEvent, isHandBackKey,
-  beforeInputToEvents, focusOfReply, keyboardHints, proxyKeyIsForwarded, textToEvents, TEXT_CHUNK,
+  diffToEvents, focusOfReply, isSwipe, swipeToWheel, TAP_SLOP_PX, keyboardHints, proxyKeyIsForwarded, textToEvents, TEXT_CHUNK,
   MOD_ALT, MOD_CTRL, MOD_META, MOD_SHIFT,
 } from '../hooks/useBrowserLive.input'
 
@@ -140,22 +140,45 @@ describe('touch typing', () => {
     expect(textToEvents('')).toEqual([])
   })
 
-  it('maps beforeinput to text, Backspace, Delete and Enter, and leaves a composition alone', () => {
-    expect(beforeInputToEvents('insertText', '4', false)).toEqual([{ type: 'key', action: 'press', key: '', text: '4', modifiers: 0 }])
-    expect(beforeInputToEvents('deleteContentBackward', null, false)?.map(e => [e.action, e.key])).toEqual([['down', 'Backspace'], ['up', 'Backspace']])
-    expect(beforeInputToEvents('deleteContentForward', null, false)?.[0].key).toBe('Delete')
-    expect(beforeInputToEvents('insertParagraph', null, false)?.[0].key).toBe('Enter')
-    expect(beforeInputToEvents('insertCompositionText', 'he', false)).toBeNull()
-    expect(beforeInputToEvents('insertText', 'x', true)).toBeNull()
-    expect(beforeInputToEvents('formatBold', null, false)).toEqual([])
+  it('diffs the proxy into Backspaces and text, by code point, a newline as Enter', () => {
+    const keys = (evs: ReturnType<typeof diffToEvents>) => evs.map(e => e.text !== undefined ? `t:${e.text}` : `${e.action}:${e.key}`)
+    expect(keys(diffToEvents('\u200b', '\u200bhi'))).toEqual(['t:hi'])
+    expect(keys(diffToEvents('\u200b', ''))).toEqual(['down:Backspace', 'up:Backspace'])
+    // Autocorrect / predictive text: "teh" became "the ".
+    expect(keys(diffToEvents('\u200bteh', '\u200bthe '))).toEqual(['down:Backspace', 'up:Backspace', 'down:Backspace', 'up:Backspace', 't:he '])
+    // An emoji is one character to delete.
+    expect(keys(diffToEvents('\u200ba\u{1F600}', '\u200ba'))).toEqual(['down:Backspace', 'up:Backspace'])
+    expect(keys(diffToEvents('', 'a\nb'))).toEqual(['t:a', 'down:Enter', 'up:Enter', 't:b'])
+    expect(diffToEvents('same', 'same')).toEqual([])
   })
 
   it('forwards named keys and chords from the proxy, not printable or IME placeholder keys', () => {
-    expect(proxyKeyIsForwarded({ ...noMods, key: 'Backspace', code: 'Backspace' })).toBe(true)
+    // Backspace edits the proxy, and the edit is what is sent.
+    expect(proxyKeyIsForwarded({ ...noMods, key: 'Backspace', code: 'Backspace' })).toBe(false)
+    expect(proxyKeyIsForwarded({ ...noMods, key: 'Backspace', code: 'Backspace', ctrlKey: true })).toBe(true)
+    expect(proxyKeyIsForwarded({ ...noMods, key: 'Delete', code: 'Delete' })).toBe(true)
     expect(proxyKeyIsForwarded({ ...noMods, key: 'Enter', code: 'Enter' })).toBe(true)
     expect(proxyKeyIsForwarded({ ...noMods, key: 'a', code: 'KeyA', ctrlKey: true })).toBe(true)
     expect(proxyKeyIsForwarded({ ...noMods, key: '5', code: 'Digit5' })).toBe(false)
     expect(proxyKeyIsForwarded({ ...noMods, key: 'Unidentified', code: '', keyCode: 229 })).toBe(false)
     expect(proxyKeyIsForwarded({ ...noMods, key: 'Backspace', code: 'Backspace', isComposing: true })).toBe(false)
+  })
+})
+
+describe('touch gestures', () => {
+  const box = { left: 0, top: 0, width: 640, height: 400 }
+  it('a finger inside the slop is a tap, past it a swipe', () => {
+    expect(isSwipe({ x: 0, y: 0 }, { x: TAP_SLOP_PX, y: 0 })).toBe(false)
+    expect(isSwipe({ x: 0, y: 0 }, { x: 6, y: 6 })).toBe(true)
+  })
+  it('a swipe is a wheel at the start point: finger up scrolls the page down, scaled to frame pixels', () => {
+    // 640x400 CSS box drawing a 1280x800 frame: 2 frame px per CSS px.
+    expect(swipeToWheel({ x: 100, y: 200 }, { x: 90, y: 150 }, { x: 100, y: 220 }, box, frame))
+      .toEqual({ type: 'wheel', x: 200, y: 440, dx: 20, dy: 100, modifiers: 0 })
+    expect(swipeToWheel({ x: 100, y: 100 }, { x: 100, y: 130 }, { x: 100, y: 100 }, box, frame)?.dy).toBe(-60)
+  })
+  it('no movement, or no box, sends nothing', () => {
+    expect(swipeToWheel({ x: 5, y: 5 }, { x: 5, y: 5 }, { x: 5, y: 5 }, box, frame)).toBeNull()
+    expect(swipeToWheel({ x: 5, y: 5 }, { x: 5, y: 50 }, { x: 5, y: 5 }, { ...box, width: 0 }, frame)).toBeNull()
   })
 })

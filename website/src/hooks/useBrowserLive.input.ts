@@ -13,7 +13,7 @@
  * the agent cannot see, and it goes to the gateway and nowhere else.
  */
 
-import { BACKSPACE_KEY, DELETE_KEY } from '../components/domDeleteKeys'
+import { BACKSPACE_KEY } from '../components/domDeleteKeys'
 
 /** The wire body. `action` tells a mouse down from up from move, a key down from up. */
 export interface BrowserInputEvent {
@@ -181,11 +181,46 @@ export function keyToEvent(action: 'down' | 'up', e: KeyLike): BrowserInputEvent
   return out
 }
 
+// ---- touch gestures ----------------------------------------------------------
+//
+// A finger is not a mouse. A finger that stays put is a tap (a click on the
+// page); one that moves past the slop is a swipe, which scrolls the page the
+// way a phone does -- content follows the finger -- and is sent as wheel
+// events, never as a mouse drag (a drag selects text instead of scrolling).
+
+/** How far (CSS px) a finger may wander and still be a tap. */
+export const TAP_SLOP_PX = 8
+
+export interface Pt { x: number; y: number }
+
+/** Whether a touch that started at `start` and is now at `now` is a swipe. */
+export function isSwipe(start: Pt, now: Pt): boolean {
+  return Math.hypot(now.x - start.x, now.y - start.y) > TAP_SLOP_PX
+}
+
+/**
+ * One step of a swipe as a wheel event at `anchor` (where the finger came
+ * down). The finger moving UP scrolls the page DOWN, so the delta is the
+ * finger's travel inverted, scaled from CSS to frame pixels. `null` when it
+ * did not move or the box has no size.
+ */
+export function swipeToWheel(prev: Pt, now: Pt, anchor: Pt, box: Box, frame: FrameSize): BrowserInputEvent | null {
+  const r = drawnRect(box, frame)
+  if (r.width <= 0 || r.height <= 0) return null
+  const dx = Math.round((prev.x - now.x) * (frame.w / r.width))
+  const dy = Math.round((prev.y - now.y) * (frame.h / r.height))
+  if (!dx && !dy) return null
+  const p = mapPointToFrame(anchor.x, anchor.y, box, frame, true)
+  if (!p) return null
+  return { type: 'wheel', x: p.x, y: p.y, dx, dy, modifiers: 0 }
+}
+
 // ---- touch typing ------------------------------------------------------------
 //
-// A canvas cannot raise a phone's keyboard. After a tap the card asks what took
-// focus in the page; for a field it focuses a hidden textarea of its own (the
-// "proxy") so the keyboard opens, and forwards what the keyboard produces.
+// A canvas cannot raise a phone's keyboard. A tap focuses a hidden textarea of
+// the card's own (the "proxy") in the same handler, so the keyboard opens; the
+// tap's reply says what took focus in the page and the card keeps or closes
+// the keyboard. What the keyboard writes into the proxy is diffed and sent.
 
 /** The gateway's answer to "what took focus" after a release. */
 export interface FieldFocus {
@@ -234,29 +269,30 @@ function namedKey(key: string, code: string): BrowserInputEvent[] {
 }
 
 /**
- * A `beforeinput` on the proxy as wire events, or `null` to let the proxy take
- * it (a composition in progress: the IME owns the text until it commits).
+ * What changed in the proxy, as the keys that make the page's field change the
+ * same way: one Backspace for every character after the common start, then the
+ * new tail as text (a newline as Enter).
+ *
+ * Diffing the proxy's value, rather than reading each `beforeinput`, is what
+ * keeps every phone keyboard honest: Android's keyboard composes each word
+ * (no `insertText` until the word ends), iOS predictive text and autocorrect
+ * replace a word they already typed, a pinyin IME swaps letters for
+ * characters. All of them end as "the text went from A to B", and A to B is
+ * all the page needs. Compared by code point, so an emoji is one Backspace.
  */
-export function beforeInputToEvents(inputType: string, data: string | null, composing: boolean): BrowserInputEvent[] | null {
-  if (composing || inputType === 'insertCompositionText') return null
-  switch (inputType) {
-    case 'insertText':
-    case 'insertReplacementText':
-    case 'insertFromPaste':
-    case 'insertFromDrop':
-      return data ? textToEvents(data) : []
-    case 'insertLineBreak':
-    case 'insertParagraph':
-      return namedKey('Enter', 'Enter')
-    case 'deleteContentBackward':
-    case 'deleteWordBackward':
-      return namedKey(BACKSPACE_KEY, BACKSPACE_KEY)
-    case 'deleteContentForward':
-    case 'deleteWordForward':
-      return namedKey(DELETE_KEY, DELETE_KEY)
-    default:
-      return []
-  }
+export function diffToEvents(prev: string, next: string): BrowserInputEvent[] {
+  const a = Array.from(prev)
+  const b = Array.from(next)
+  let k = 0
+  while (k < a.length && k < b.length && a[k] === b[k]) k += 1
+  const out: BrowserInputEvent[] = []
+  for (let i = k; i < a.length; i += 1) out.push(...namedKey(BACKSPACE_KEY, BACKSPACE_KEY))
+  const lines = b.slice(k).join('').split(/\r\n|\r|\n/)
+  lines.forEach((line, i) => {
+    if (i > 0) out.push(...namedKey('Enter', 'Enter'))
+    out.push(...textToEvents(line))
+  })
+  return out
 }
 
 export interface ProxyKeyLike extends KeyLike {
@@ -265,16 +301,17 @@ export interface ProxyKeyLike extends KeyLike {
 }
 
 /**
- * Whether a key down on the proxy goes to the page as a KEY. Printable keys do
- * not: their character arrives as `beforeinput` and is sent as text, so sending
- * the key too would type it twice. Neither does an IME's placeholder key
- * (`Unidentified`/`Process`, keyCode 229, Android's soft keyboard for every
- * key): its `beforeinput` says what it did. Named keys (Backspace on iOS, Enter,
- * Tab, arrows) and Ctrl/Meta chords do.
+ * Whether a key down on the proxy goes to the page as a KEY (and is kept out
+ * of the proxy). Printable keys and Backspace do not: they edit the proxy, and
+ * the edit is diffed and sent (`diffToEvents`), so sending the key too would
+ * type it twice. Neither does an IME's placeholder key (`Unidentified`/
+ * `Process`, keyCode 229, Android's soft keyboard for every key). Other named
+ * keys (Enter, Tab, Delete, arrows) and Ctrl/Meta chords do.
  */
 export function proxyKeyIsForwarded(e: ProxyKeyLike): boolean {
   if (e.isComposing || e.keyCode === 229 || e.key === 'Unidentified' || e.key === 'Process' || e.key === 'Dead') return false
-  if (printable(e.key) && !(modifiersOf(e) & (MOD_CTRL | MOD_META))) return false
+  const chord = !!(modifiersOf(e) & (MOD_CTRL | MOD_META))
+  if ((printable(e.key) || e.key === BACKSPACE_KEY) && !chord) return false
   return true
 }
 
