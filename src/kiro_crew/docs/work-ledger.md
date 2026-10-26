@@ -198,7 +198,8 @@ at the cap still reads.
 
 ## A person's steer
 
-In a Crew Mode chat you can type into any worker from the side panel. The text
+In a Crew Mode chat you can type into any crew member (a worker session) from the
+**Crew** tab of the side panel. The text
 reaches the worker as your own message, and when that worker holds an item on the
 chat's own ledger the item also gets one `steer` event: the time, actor `person`,
 and your text, redacted and cut to 500 characters. `work_ledger_read` shows it in

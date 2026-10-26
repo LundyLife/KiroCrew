@@ -140,7 +140,7 @@ describe('CrewTimeline', () => {
     expect(within(gone).getByTestId('crew-timeline-no-record')).toHaveTextContent('Closed · no record')
     expect(gone.querySelector('[data-track-of]')).toBeNull()
     const tip = (await screen.findByTestId('crew-timeline-gaps')).querySelector('[title]')?.getAttribute('title') ?? ''
-    expect(tip).toContain('Closed workers whose saved transcript can no longer be read')
+    expect(tip).toContain('Closed crew members whose saved transcript can no longer be read')
   })
 
   it('heads the view with real elapsed time and credits, and is static once done', async () => {

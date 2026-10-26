@@ -46,7 +46,7 @@ describe('CrewWorkerComposerGate (edge review R2)', () => {
     await renderGate(live)
     act(() => { noteCrewSteerReceipt('w1', { ok: true, ledger_event: null, ledger_error: 'no_item' }) })
     const line = screen.getByTestId('crew-steer-not-recorded')
-    expect(line).toHaveTextContent('Delivered to Worker B, but not recorded on the ledger: the worker has no open task.')
+    expect(line).toHaveTextContent('Delivered to Worker B, but not recorded on the ledger: the crew member has no open task.')
     expect(line.textContent).not.toContain('no_item')
     expect(steerUnrecordedLine('crew_log_unit_unknown', 'W')).toBe('Delivered to W, but not recorded on the ledger: the ledger write failed.')
     expect(steerUnrecordedLine('not_recorded', 'W')).toBe('Delivered to W, but not recorded on the ledger: the ledger write failed.')

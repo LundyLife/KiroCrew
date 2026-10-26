@@ -260,13 +260,13 @@ describe('chat sidebar — conductor lane', () => {
     await qc.refetchQueries({ queryKey: ['crew-workers', 'k-root'] })
     await waitFor(() => expect(qc.getQueryState(['crew-workers', 'k-root'])?.status).toBe('error'))
     expect(screen.getByTestId('crew-root-summary')).toHaveTextContent('Approval needed · 1')
-    expect(screen.queryByText('Could not load the workers.')).toBeNull()
+    expect(screen.queryByText('Could not load the crew.')).toBeNull()
     unmount()
     // Never any data: the row keeps its normal line, with no red notice on it.
     const second = renderSidebar(slots, [], null, {}, [], slots)
     await waitFor(() => expect(second.qc.getQueryState(['crew-workers', 'k-root'])?.status).toBe('error'))
     expect(screen.getByText('Dispatched two workers')).toBeInTheDocument()
-    expect(screen.queryByText('Could not load the workers.')).toBeNull()
+    expect(screen.queryByText('Could not load the crew.')).toBeNull()
     expect(screen.queryByTestId('crew-root-summary')).toBeNull()
   })
 

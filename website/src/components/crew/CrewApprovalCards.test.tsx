@@ -49,7 +49,7 @@ describe('CrewApprovalCards (owner decision B)', () => {
     expect(card).toHaveTextContent('Shell')
     expect(within(card).getByRole('region', { name: 'The exact tool input' })).toHaveTextContent('ls w1')
     expect(await within(card).findByText('Fix the build')).toBeInTheDocument()
-    for (const name of ['Approve', 'Reject', 'Trust this worker']) {
+    for (const name of ['Approve', 'Reject', 'Trust this crew member']) {
       expect(within(card).getByRole('button', { name })).toBeInTheDocument()
     }
     // Another root's worker, and a plain session, get no card here.
@@ -59,7 +59,7 @@ describe('CrewApprovalCards (owner decision B)', () => {
   it.each([
     ['Approve', 'approve'],
     ['Reject', 'reject'],
-    ['Trust this worker', 'trust'],
+    ['Trust this crew member', 'trust'],
   ] as const)('%s decides on the worker slot through the crew route', async (label, action) => {
     api.crewWorkers.mockResolvedValue({ root: 'root', workers: [] })
     api.crewWorkerApprove.mockResolvedValue({ ok: true })
@@ -84,7 +84,7 @@ describe('CrewApprovalCards (owner decision B)', () => {
     api.crewWorkers.mockResolvedValue({ root: 'root', workers: [] })
     const row = waiting('w1')
     await renderCards([{ ...row, pending_approval_info: { ...row.pending_approval_info, trust_grantable: undefined } }])
-    expect(screen.queryByRole('button', { name: 'Trust this worker' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Trust this crew member' })).toBeNull()
   })
 
   it('leaves the stack live when the request is decided elsewhere', async () => {

@@ -53,7 +53,7 @@ describe('CrewWorkerBreadcrumb on a phone', () => {
     fail.on = true
     try {
       renderCrumb()
-      expect(await screen.findByText('Could not load the workers.')).toBeInTheDocument()
+      expect(await screen.findByText('Could not load the crew.')).toBeInTheDocument()
       expect(screen.getByTestId('crew-worker-breadcrumb')).toBeInTheDocument()
     } finally {
       fail.on = false
@@ -70,7 +70,7 @@ describe('CrewWorkerBreadcrumb on a phone', () => {
       expect(await screen.findByText('Done')).toBeInTheDocument()
       fail.on = true
       await act(async () => { vi.advanceTimersByTime(16_000) })
-      expect(await screen.findByText('Could not load the workers.')).toBeInTheDocument()
+      expect(await screen.findByText('Could not load the crew.')).toBeInTheDocument()
       expect(screen.getByTestId('crew-status')).toHaveAttribute('data-group', 'done')
     } finally {
       vi.useRealTimers()

@@ -93,7 +93,7 @@ describe('CrewWorkerList (design B)', () => {
   it('shows a loading line while the first read is in flight (X6)', () => {
     api.crewWorkers.mockReturnValue(new Promise(() => {}))
     renderWith(<CrewWorkerList root="root-1" viewing="root-1" active />)
-    expect(screen.getByTestId('crew-workers-loading')).toHaveTextContent('Loading the workers…')
+    expect(screen.getByTestId('crew-workers-loading')).toHaveTextContent('Loading the crew…')
   })
 
   it('shows no raw ledger id on a card', async () => {
@@ -106,7 +106,7 @@ describe('CrewWorkerList (design B)', () => {
   it('says when the list cannot be read', async () => {
     api.crewWorkers.mockRejectedValue(new Error('nope'))
     renderWith(<CrewWorkerList root="root-1" viewing="root-1" active />)
-    expect(await screen.findByText('Could not load the workers.')).toBeInTheDocument()
+    expect(await screen.findByText('Could not load the crew.')).toBeInTheDocument()
   })
 
   it('the Workers tab finds the root from a worker row and says so on a plain chat', async () => {
