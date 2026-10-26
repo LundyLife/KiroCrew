@@ -1864,6 +1864,8 @@ def _libdefaults_ccache(path: Path, depth: int, seen: set[Path] | None = None) -
     if text is None:
         return None
     section = ""
+    # Subsection depth: a key inside ``name = { ... }`` is not a libdefaults key.
+    braces = 0
     for raw in text.splitlines():
         line = raw.strip()
         # libkrb5 honours include/includedir only at the start of a line.
@@ -1880,13 +1882,45 @@ def _libdefaults_ccache(path: Path, depth: int, seen: set[Path] | None = None) -
                 found = _libdefaults_ccache(child, depth + 1, seen)
                 if found is not None:
                     return found
-        elif line.startswith("[") and line.endswith("]"):
-            section = line[1:-1].strip().lower()
-        elif section == "libdefaults" and not line.startswith(("#", ";")):
+        elif line.startswith("[") and line.endswith(("]", "]*")):
+            # A trailing ``*`` marks the section final; it is still a header.
+            section = line[1 : line.rindex("]")].strip().lower()
+            braces = 0
+        elif line.startswith("}"):
+            braces = max(braces - 1, 0)
+        elif not line.startswith(("#", ";")):
             key, sep, value = line.partition("=")
-            if sep and key.strip() == "default_ccache_name" and value.strip():
-                return value.strip()
+            value = value.strip()
+            if not sep:
+                continue
+            if value[:1] == "{":
+                braces += 1
+            elif section == "libdefaults" and braces == 0 and key.strip() == "default_ccache_name":
+                if value[:1] == '"':
+                    value = _krb5_quoted_value(value[1:])
+                if value:
+                    return value
     return None
+
+
+# libkrb5's profile parser decodes these escapes in a double-quoted value; any
+# other escaped character stands for itself.
+_KRB5_QUOTED_ESCAPES = {"n": "\n", "t": "\t", "b": "\b"}
+
+
+def _krb5_quoted_value(text: str) -> str:
+    """Decode a double-quoted krb5 profile value, *text* starting after the opening quote."""
+    out: list[str] = []
+    chars = iter(text)
+    for ch in chars:
+        if ch == '"':
+            break
+        if ch == "\\":
+            escaped = next(chars, "")
+            out.append(_KRB5_QUOTED_ESCAPES.get(escaped, escaped))
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def usable_file_ccache() -> str | None:

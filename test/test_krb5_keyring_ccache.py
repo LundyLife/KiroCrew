@@ -103,6 +103,54 @@ class TestKeyringCcache:
         conf = _conf(tmp_path, "[realms]\n default_ccache_name = KEYRING:persistent:1\n")
         assert env_mod.krb5_keyring_ccache({"KRB5_CONFIG": str(conf)}) is None
 
+    def test_double_quoted_value_is_decoded(self, linux, tmp_path) -> None:
+        conf = _conf(
+            tmp_path, '[libdefaults]\n default_ccache_name = "KEYRING:persistent:%{uid}"\n'
+        )
+        assert env_mod.krb5_keyring_ccache({"KRB5_CONFIG": str(conf)}) == "KEYRING:persistent:4242"
+
+    @pytest.mark.parametrize(
+        ("quoted", "decoded"),
+        [
+            (r'"a\"b" trailing', 'a"b'),
+            (r'"a\\b"', "a\\b"),
+            (r'"a\nb\tc\bd"', "a\nb\tc\bd"),
+            (r'"a\qb"', "aqb"),
+        ],
+    )
+    def test_quoted_value_escapes_follow_libkrb5(self, quoted, decoded) -> None:
+        assert env_mod._krb5_quoted_value(quoted[1:]) == decoded
+
+    def test_final_section_marker_is_a_section_header(self, linux, tmp_path) -> None:
+        conf = _conf(tmp_path, "[libdefaults]*\n default_ccache_name = KEYRING:persistent:1\n")
+        assert env_mod.krb5_keyring_ccache({"KRB5_CONFIG": str(conf)}) == "KEYRING:persistent:1"
+
+    def test_final_marker_on_another_section_leaves_libdefaults(self, linux, tmp_path) -> None:
+        body = "[libdefaults]\n[realms]*\n default_ccache_name = KEYRING:persistent:1\n"
+        assert env_mod.krb5_keyring_ccache({"KRB5_CONFIG": str(_conf(tmp_path, body))}) is None
+
+    def test_key_inside_a_subsection_is_not_the_default(self, linux, tmp_path) -> None:
+        body = (
+            "[libdefaults]\n"
+            " EXAMPLE.COM = {\n"
+            "  default_ccache_name = KEYRING:persistent:1\n"
+            " }\n"
+            " default_ccache_name = FILE:/tmp/cc\n"
+        )
+        assert env_mod.krb5_keyring_ccache({"KRB5_CONFIG": str(_conf(tmp_path, body))}) is None
+
+    def test_top_level_default_after_a_subsection_is_found(self, linux, tmp_path) -> None:
+        body = (
+            "[libdefaults]\n"
+            " EXAMPLE.COM = {\n"
+            "  default_ccache_name = FILE:/tmp/cc\n"
+            " }\n"
+            " default_ccache_name = KEYRING:persistent:1\n"
+        )
+        assert env_mod.krb5_keyring_ccache({"KRB5_CONFIG": str(_conf(tmp_path, body))}) == (
+            "KEYRING:persistent:1"
+        )
+
     def test_missing_conf_is_none(self, linux, tmp_path) -> None:
         assert env_mod.krb5_keyring_ccache({"KRB5_CONFIG": str(tmp_path / "absent")}) is None
 
