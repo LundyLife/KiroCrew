@@ -50,6 +50,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from kiro_crew.dashboard import tailnet
 from kiro_crew.dashboard.tailnet import (
     _cli_path,
     is_governance_pinned_off,
@@ -93,6 +94,7 @@ SERVE_MOUNT = "/"
 ResultCode = Literal[
     "ok",
     "governance_pinned",
+    "governance_tailnet",
     "no_cli",
     "no_permission",
     "daemon_unavailable",
@@ -259,8 +261,7 @@ def _classify(output: str) -> ResultCode:
     """
     low = output.lower()
     if any(
-        s in low
-        for s in ("access denied", "permission denied", "must be run as root", "operator")
+        s in low for s in ("access denied", "permission denied", "must be run as root", "operator")
     ):
         return "no_permission"
     if any(
@@ -521,8 +522,7 @@ def serve_state(port: int) -> ServeState:
     return ServeState(
         False,
         True,
-        f"Serve is configured on {SERVE_HTTPS_PORT}{SERVE_MOUNT}, but not for "
-        f"this dashboard.",
+        f"Serve is configured on {SERVE_HTTPS_PORT}{SERVE_MOUNT}, but not for " f"this dashboard.",
         port_free=False,
     )
 
@@ -593,6 +593,19 @@ def publish(port: int, *, audit_tool: str = "tailnet_publish") -> ServeResult:
     # installed" would be reported as "could not confirm the mount is free".
     if _cli_path() is None:
         return _no_cli_result(port)
+    # A set ``tailnets`` list refuses every publish path (CLI and dashboard), in
+    # both editions, before anything is read from the daemon.
+    if tailnet.tailnet_list_set():
+        from kiro_crew.edition_locks import audit_refusal
+
+        audit_refusal(audit_tool, "capabilities.tailnet_origin", "tailnets", "list set")
+        return ServeResult(
+            False,
+            "governance_tailnet",
+            "Your administrator's security policy sets a tailnet list "
+            "(capabilities.tailnet_origin tailnets), so tailnet access is off. "
+            "Nothing was published.",
+        )
     # Proceed ONLY when OUR PORT is explicitly free or the mount is already ours.
     # Anything else — including a state we could not determine — refuses, because the
     # costs are not symmetric: overwriting destroys configuration the operator
@@ -639,8 +652,7 @@ def publish(port: int, *, audit_tool: str = "tailnet_publish") -> ServeResult:
         return ServeResult(
             False,
             "failed",
-            "The tailscale CLI is installed but could not be launched: "
-            + (err or "").strip(),
+            "The tailscale CLI is installed but could not be launched: " + (err or "").strip(),
         )
     if rc != 0:
         said = _daemon_output(out=out, err=err)
@@ -751,9 +763,7 @@ def unpublish(port: int, *, audit_tool: str = "tailnet_unpublish") -> ServeResul
         # Idempotent no-op: nothing is served at all, so there is nothing to
         # withdraw and nothing to endanger. Reported as success because the
         # caller's goal ("not published") already holds.
-        return ServeResult(
-            True, "ok", "Nothing is published — no serve configuration is active."
-        )
+        return ServeResult(True, "ok", "Nothing is published — no serve configuration is active.")
     if state.published is False and state.port_free is True:
         # The same idempotent no-op one level narrower: serve IS configured, but
         # everything it holds sits on other ports. There is nothing on our port

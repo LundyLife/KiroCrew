@@ -62,6 +62,35 @@ POLICY_VERSION = 1
 _PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
+#: Rulesets an enterprise policy may only write as an allow list. A deny list of
+#: origins misses every other spelling of the same origin; an allow list fails
+#: closed (RFC D3).
+ALLOW_ONLY_IN_ENTERPRISE = frozenset({"dashboard_origins"})
+
+
+def _refuse_inexact_origin_entries(scope: str, ruleset: ScopedRuleset) -> None:
+    """Enterprise: every entry must be an exact origin, or the policy is refused.
+
+    Literal lower-case ASCII ``scheme://host[:port]``: no glob (``* ? [ ]``), no
+    non-ASCII (write the ``xn--`` form), no path or trailing ``/``, no userinfo, and
+    no written-out default port. Matching is then exact set membership.
+    """
+    from kiro_crew import edition
+    from kiro_crew.platform.governance_parts.matching import ENTERPRISE_ORIGIN_ENTRY_RE
+
+    if not edition.is_enterprise():
+        return
+    for entry in ruleset.allow:
+        default_port = entry.endswith(":80") and entry.startswith("http://")
+        default_port = default_port or (entry.endswith(":443") and entry.startswith("https://"))
+        if default_port or not ENTERPRISE_ORIGIN_ENTRY_RE.match(entry):
+            raise PlatformCompositionError(
+                f"scope {scope!r} entry {entry!r} is not an exact origin: write a "
+                "lower-case ASCII scheme://host[:port] with no wildcard, path, userinfo "
+                "or default port (use the xn-- form for a non-ASCII host)"
+            )
+
+
 def _parse_control(scope: str, spec: ScopeSpec, raw: object, *, is_policy: bool) -> object:
     """Parse one raw JSON control value into its archetype, per the catalog."""
     if not isinstance(raw, dict):
@@ -70,6 +99,17 @@ def _parse_control(scope: str, spec: ScopeSpec, raw: object, *, is_policy: bool)
         raise PlatformCompositionError(f"scope {scope!r} must be an object")
     if spec.kind == RULESET:
         ruleset = ScopedRuleset.from_dict(raw, matcher=spec.matcher, scope=scope)
+        if is_policy and ruleset.mode != "allow" and scope in ALLOW_ONLY_IN_ENTERPRISE:
+            from kiro_crew import edition
+
+            if edition.is_enterprise():
+                raise PlatformCompositionError(
+                    f"scope {scope!r} must use an allow list in the enterprise edition "
+                    '("mode": "allow"); a deny list cannot name every spelling of an '
+                    "origin, so it is refused"
+                )
+        if is_policy and scope in ALLOW_ONLY_IN_ENTERPRISE:
+            _refuse_inexact_origin_entries(scope, ruleset)
         for floor in spec.always_permitted:
             # An ``always_permitted`` identifier is one this scope may not forbid.
             # Two reasons qualify, and the catalog entry says which applies: the

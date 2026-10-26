@@ -89,7 +89,7 @@ def _stub_serve(
     monkeypatch.setattr(
         tailnet_serve, "serve_state", lambda *a, **k: state or ServeState(True, True, "serving")
     )
-    monkeypatch.setattr(tailnet, "self_dns_name", lambda: name)
+    monkeypatch.setattr(tailnet, "self_dns_name", lambda **_kw: name)
     monkeypatch.setattr(tailnet, "is_governance_pinned_off", lambda *a, **k: False)
 
 

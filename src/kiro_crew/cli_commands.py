@@ -404,7 +404,11 @@ def _tailnet(args: argparse.Namespace) -> None:
             f"   Trust:      {'enabled' if enabled else 'disabled'} "
             f"(dashboard.tailscale.enabled)"
         )
-        print(f"   Name:       {name or '— (no tailnet name resolvable right now)'}")
+        if tailnet.tailnet_list_set():
+            name_line = "— (tailnet access is off: the policy sets a tailnets list)"
+        else:
+            name_line = name or "— (no tailnet name resolvable right now)"
+        print(f"   Name:       {name_line}")
         published = state.published
         label = {True: "yes", False: "no", None: "unknown"}[published]
         print(f"   Published:  {label} — {state.detail}")
@@ -467,7 +471,7 @@ def _tailnet(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
-    result = tailnet_serve.publish(port)
+    result = tailnet_serve.publish(port, audit_tool="tailnet_cli_up")
     if not result.ok:
         print(f"❌ {result.detail}", file=sys.stderr)
         sys.exit(1)

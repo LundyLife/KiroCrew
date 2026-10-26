@@ -357,7 +357,12 @@ def check_origin(
             req = _split_authority(request.headers.get("Host", ""))
             if req is not None and req[0]:
                 if (_canonical_host(req[0]), req[1]) == (canon_host, canon_port):
-                    return True
+                    # Not on the allowlist, so an extra origin: the
+                    # ``dashboard_origins`` policy decides it, audited (oss with
+                    # no policy: allowed).
+                    from kiro_crew.dashboard.urls import origin_permitted
+
+                    return origin_permitted(origin_base, audit_tool="dashboard_origin_request")
     # NOTE (CSE SEC-016): we deliberately do NOT blanket-trust every loopback
     # origin regardless of port. A browser always sends an Origin header, so a
     # malicious local web page on an arbitrary port would otherwise pass this

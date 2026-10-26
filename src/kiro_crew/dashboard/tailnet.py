@@ -323,14 +323,42 @@ def _valid_magicdns_name(raw: object, magic_dns_suffix: object) -> str | None:
     return name
 
 
+def tailnet_list_set() -> bool:
+    """Whether the rules set a ``tailnets`` list on ``capabilities.tailnet_origin``.
+
+    Matching that list is not implemented yet, so a set list refuses every tailnet:
+    no name is derived and nothing is published, in both editions. Nothing is read
+    from the daemon, so no timeout or error path can get past it. Fail-closed: an
+    unreadable ceiling answers ``True``.
+    """
+    try:
+        from kiro_crew.platform.context import current_context
+        from kiro_crew.platform.governance import CapabilityGate, policy_level_control
+
+        control = policy_level_control(
+            getattr(current_context(), "governance", None), "capabilities.tailnet_origin"
+        )
+    except Exception:
+        logger.debug("could not read the tailnet ceiling; treating a list as set")
+        return True
+    return isinstance(control, CapabilityGate) and "tailnets" in control.scopes
+
+
 def self_dns_name() -> str | None:
     """This machine's MagicDNS name on its tailnet, or ``None``.
 
     ``None`` covers every "not applicable" case as well as every failure:
     Tailscale absent, daemon not running, machine not logged in (``CurrentTailnet``
-    is nil), MagicDNS disabled for the tailnet, or a name that does not validate
-    against the tailnet's own suffix.
+    is nil), MagicDNS disabled for the tailnet, a name that does not validate
+    against the tailnet's own suffix, or a ``tailnets`` list the rules set
+    (:func:`tailnet_list_set`; the daemon is then not asked).
     """
+    if tailnet_list_set():
+        logger.warning(
+            "capabilities.tailnet_origin sets a tailnets list, which this build does "
+            "not match yet; no tailnet origin is derived"
+        )
+        return None
     status = _run_json(["status", "--json"])
     if not isinstance(status, dict):
         return None
@@ -429,6 +457,9 @@ class DaemonProbe:
     #: report any unmet requirement. ``False`` is reserved for an explicit
     #: ``CertDomains`` list that does not contain this host.
     https_enabled: bool | None = None
+    #: The rules set a ``tailnets`` list (:func:`tailnet_list_set`), so tailnet
+    #: access is off. An administrator's decision, like a pinned capability.
+    governance_refused: bool = False
 
 
 def _count_peers(status: dict) -> tuple[int, int]:
@@ -508,6 +539,21 @@ def probe_daemon() -> DaemonProbe:
         )
     peer_count, peers_online = _count_peers(status)
     login = _self_login(status)
+    if tailnet_list_set():
+        return DaemonProbe(
+            name="",
+            installed=True,
+            reachable=True,
+            logged_in=True,
+            detail=(
+                "Your administrator's security policy sets a tailnet list "
+                "(capabilities.tailnet_origin tailnets), so tailnet access is off."
+            ),
+            login=login,
+            peer_count=peer_count,
+            peers_online=peers_online,
+            governance_refused=True,
+        )
     name = self_dns_name() or ""
     if not name:
         return DaemonProbe(
@@ -678,6 +724,14 @@ async def resolve_tailnet_host(enabled: bool) -> str:
             "origin was derived and the Tailscale daemon was not consulted. This "
             "setting cannot re-enable it — ask your administrator, or reach the "
             "dashboard through an explicitly configured dashboard.url."
+        )
+        return ""
+    if await asyncio.to_thread(tailnet_list_set):
+        # self_dns_name would refuse too; return before the boot-race warning
+        # below, whose remedy (check `tailscale status`) is the wrong one here.
+        logger.warning(
+            "dashboard.tailscale.enabled is on, but the security policy sets a "
+            "tailnets list (capabilities.tailnet_origin), so tailnet access is off."
         )
         return ""
     name: str | None = await asyncio.to_thread(self_dns_name)
