@@ -299,17 +299,21 @@ def test_launch_says_nothing_without_a_parent_socket(tmp_path, caplog, _fresh_no
 
 
 def test_concurrent_spawns_of_one_harness_log_once(_fresh_notice_memory, caplog):
-    """Two spawns of the same harness in flight at once still produce one line."""
+    """A second spawn while the first is still computing its notice logs nothing."""
     import asyncio
     import threading
     from types import SimpleNamespace
 
+    from kiro_crew.testing.wait import await_until, wait_until
+
+    entered = threading.Event()
     gate = threading.Event()
     calls: list = []
 
     def _notice(backend, mode, hidden):
         calls.append(backend)
-        gate.wait(5)
+        entered.set()
+        gate.wait()  # released by the test in ``finally``; never a timing bet
         return "ssh-agent not forwarded to the codex agent: NOTICE"
 
     class _Host:
@@ -325,12 +329,20 @@ def test_concurrent_spawns_of_one_harness_log_once(_fresh_notice_memory, caplog)
         first = asyncio.create_task(
             launch_mod._note_ssh_auth_sock_withheld(_Host(), tools, request)
         )
-        second = asyncio.create_task(
-            launch_mod._note_ssh_auth_sock_withheld(_Host(), tools, request)
-        )
-        await asyncio.sleep(0.05)
-        gate.set()
-        await asyncio.gather(first, second)
+        try:
+            # The first spawn is parked inside its notice read...
+            await asyncio.to_thread(wait_until, entered.is_set)
+            # ...when the second one runs to completion.
+            await await_until(
+                asyncio.ensure_future(
+                    launch_mod._note_ssh_auth_sock_withheld(_Host(), tools, request)
+                ),
+                what="second spawn's notice step",
+            )
+            assert calls == ["codex"]
+        finally:
+            gate.set()
+        await await_until(first, what="first spawn's notice step")
 
     with caplog.at_level(logging.WARNING):
         asyncio.run(_both())
