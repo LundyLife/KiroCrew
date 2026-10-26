@@ -46,12 +46,17 @@ class TestCronApprovalModeField:
 class TestCronApprovalModeGateway:
     """Gateway passes correct args to stream_and_collect based on approval_mode."""
 
-    def _run_cron_callback(self, approval_mode: str) -> dict:
+    def _run_cron_callback(self, approval_mode: str, retained_policy: str = "") -> dict:
         """Invoke the real _cron_callback closure and capture stream_and_collect kwargs."""
         from kiro_crew.slack.gateway import GatewayOrchestrator
 
         gw = GatewayOrchestrator.__new__(GatewayOrchestrator)
+        self.gw = gw
         gw.sessions = MagicMock()
+        # The policy of a session already live under the job's key (a fire whose
+        # sub-agents were still running keeps it), "" when there is none.
+        gw.sessions.get_approval_policy = MagicMock(return_value=retained_policy)
+        gw.sessions.set_approval_policy = MagicMock()
         gw.sessions.get_pid = MagicMock(return_value=None)
         gw.ctx_builder = MagicMock()
         gw.ctx_builder.conversation_log.get_metadata_status.return_value = ({}, True)
@@ -117,6 +122,21 @@ class TestCronApprovalModeGateway:
         captured = self._run_cron_callback("")
         assert captured["approval_policy"] == ToolApprovalPolicy.HOOK_BASED
         assert captured["on_tool_approval"] is not None
+
+    def test_a_job_no_longer_auto_takes_auto_off_its_retained_session(self) -> None:
+        # Sub-agents spawned this fire read the parent session's policy, so a
+        # retained "auto" session must not outlive the job's own auto.
+        self._run_cron_callback("", retained_policy="auto")
+        self.gw.sessions.set_approval_policy.assert_called_once()
+        assert self.gw.sessions.set_approval_policy.call_args.args[1] == ""
+
+    def test_an_auto_job_leaves_its_retained_session_alone(self) -> None:
+        self._run_cron_callback("auto", retained_policy="auto")
+        self.gw.sessions.set_approval_policy.assert_not_called()
+
+    def test_a_normal_job_with_no_retained_auto_changes_nothing(self) -> None:
+        self._run_cron_callback("", retained_policy="")
+        self.gw.sessions.set_approval_policy.assert_not_called()
 
 
 class TestCronApprovalModeExtraEnv:
@@ -257,10 +277,10 @@ class TestCronApprovalModeValidation:
                 "cron_add",
                 {"name": "test", "message": "go", "every": 300, "approval_mode": "auto"},
             )
-        assert "v1" in result
-        # #391: approval_mode is folded into add_job's single locked save, not
-        # mutated onto the returned job -- assert it was passed INTO add_job.
-        assert mock_svc.return_value.add_job.call_args.kwargs["approval_mode"] == "auto"
+        # 'auto' is the owner's switch (Schedule page): a tool call is refused
+        # before anything is written.
+        assert result.startswith("Error: approval_mode 'auto' can only be turned on by the owner")
+        mock_svc.return_value.add_job.assert_not_called()
 
     def test_valid_empty(self) -> None:
         with patch("kiro_crew.mcp_cron.CronService") as mock_svc:

@@ -811,6 +811,14 @@ async def _acquire_with_model_fallback(
     # unreadable store) the fire touches no session, since it could
     # not tell a stale one from a healthy one on any fire.
     await _retire_sessions_on_identity_change(self.dashboard_state, unattended=True)
+    # A session retained under this key (a fire whose sub-agents were still
+    # running skipped its reset) keeps the policy it was created with, and
+    # get_or_create only ever raises it: an empty policy leaves it alone. When
+    # the saved job is no longer auto -- the owner switched it off, or a tool
+    # edit reset it -- take auto off the retained session too, so this fire's
+    # sub-agents do not inherit it.
+    if job.approval_mode != "auto" and self.sessions.get_approval_policy(key) == "auto":
+        self.sessions.set_approval_policy(key, "")
     try:
         client, is_new, resumed = await self.sessions.get_or_create(
             key,
