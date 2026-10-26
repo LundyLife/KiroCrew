@@ -525,9 +525,13 @@ export default function ComposerDockView({
                   frame, header or hint. What it does differs only in delivery: a
                   send is a person steer, and a running turn takes it as a steer. */}
               <div data-testid={steerWorker !== undefined ? 'crew-steer-composer' : undefined}>
+              {/* The gate lines sit on the composer's own column (its px-4 and
+                  content width), now that no ring frames them. */}
               {crewWorkerView && activeSlot && (
-                <CrewWorkerComposerGate root={steerWorkerRoot} worker={activeSlot} workerTitle={steerWorker ?? ''}
-                  waitingForApproval={!!currentSlot?.pending_approval} />
+                <div className="px-4 mx-auto w-full" style={{ maxWidth: 'var(--mc-content-width, 900px)' }}>
+                  <CrewWorkerComposerGate root={steerWorkerRoot} worker={activeSlot} workerTitle={steerWorker ?? ''}
+                    waitingForApproval={!!currentSlot?.pending_approval} />
+                </div>
               )}
               <Composer
                 ref={composerRef}
@@ -741,7 +745,7 @@ export default function ComposerDockView({
               connected={connected}
             />
               </Composer>
-              {steerWorker !== undefined && steerTooLong && <p role="alert" className="mt-1 px-1 text-[12px] text-danger-text" data-testid="crew-steer-too-long">{i18nT('components.crewMode.steer_too_long', { max: CREW_STEER_MAX_CHARS.toLocaleString() })}</p>}
+              {steerWorker !== undefined && steerTooLong && <p role="alert" className="mt-1 px-5 mx-auto w-full text-[12px] text-danger-text" style={{ maxWidth: 'var(--mc-content-width, 900px)' }} data-testid="crew-steer-too-long">{i18nT('components.crewMode.steer_too_long', { max: CREW_STEER_MAX_CHARS.toLocaleString() })}</p>}
               </div>
             </div>
             {/* Agent dropdown portal — triggered from input bar */}
