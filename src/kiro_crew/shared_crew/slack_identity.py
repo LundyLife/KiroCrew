@@ -132,7 +132,9 @@ def slack_principal(
     *display_name* defaults to the registered ``users.info`` cache. It is a
     label only and never part of the id, and is cleaned of control and
     format characters (bidi overrides could otherwise disguise a byline). With
-    no name it is empty -- the raw user id is never shown -- and a surface
+    no name, or a "name" that is just the raw user id (what a failed
+    ``users.info`` lookup leaves cached), it is empty -- the raw user id is
+    never shown -- and a surface
     labels the person by their channel. Ids that do not have Slack's shapes
     give Unknown.
     """
@@ -143,6 +145,10 @@ def slack_principal(
     issuer = enterprise_id or team_id
     label = _display_name(user_id) if display_name is None else display_name
     name = _clean_label(label)
+    if name == user_id:
+        # A failed ``users.info`` lookup can leave the raw id cached as the
+        # name. That is no name: the surface labels the person by channel.
+        name = ""
     return Principal(
         id=principal_id_for(PROVIDER_SLACK, issuer, user_id),
         kind=PrincipalKind.MACHINE if _is_machine(user_id) else PrincipalKind.HUMAN,

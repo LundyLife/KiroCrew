@@ -7,6 +7,7 @@ import { api } from '../../../api/client'
 import { ALL_UNAVAILABLE } from '../../../api/sharedCrewUi'
 import type { CrewModeResponse } from '../../../api/sharedCrewMode'
 import { MessageByline } from './MessageByline'
+import { useSharedCrewMode } from '../../../hooks/sharedCrew/useSharedCrew'
 
 vi.mock('../../../api/client', () => ({ api: { sharedCrewViewer: vi.fn(), sharedCrewCapabilities: vi.fn(), sharedCrewMode: vi.fn(), sharedCrewPeople: vi.fn() } }))
 const viewer = vi.mocked(api.sharedCrewViewer)
@@ -113,9 +114,14 @@ describe('MessageByline for a Slack sender', () => {
       team_config: { state: 'not_configured', reason: '', capability: '', cause: '' },
       console: { state: 'not_offered', url: '' }, adapters: {}, systems_manager_attribution: 'unavailable', workload_identity_ref: 'unavailable',
     } satisfies CrewModeResponse)
-    mount(<MessageByline meta={slackAuthor()} slotKey="s1" />, [SLOT])
-    await waitFor(() => expect(api.sharedCrewMode).toHaveBeenCalled())
-    await new Promise(r => setTimeout(r, 20))
+    // The witness reads the same mode query the byline gates on, so once it
+    // renders the byline has rendered against the loaded personal mode too:
+    // its absence is then the decision, not a not-yet-loaded state.
+    function ModeLoaded() {
+      return useSharedCrewMode().isSuccess ? <span data-testid="mode-loaded" /> : null
+    }
+    mount(<><MessageByline meta={slackAuthor()} slotKey="s1" /><ModeLoaded /></>, [SLOT])
+    await screen.findByTestId('mode-loaded')
     expect(screen.queryByTestId('message-byline')).toBeNull()
   })
 })

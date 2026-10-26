@@ -92,6 +92,21 @@ def test_display_never_falls_back_to_the_user_id_or_an_avatar(_names):
     assert "avatar" not in json.dumps(p.to_public_dict())
 
 
+@pytest.mark.parametrize("cached", ["U0ALICE", " U0ALICE ", "U0\u200bALICE"])
+def test_a_cached_name_that_is_the_user_id_counts_as_no_name(_names, cached):
+    # A failed users.info lookup can leave the raw id cached as the "name".
+    _names["U0ALICE"] = cached
+    p = si.sender_principal(ALICE_IDS)
+    assert p is not None and p.display.name == ""
+    assert "U0ALICE" not in json.dumps(p.to_public_dict())
+
+
+def test_a_name_that_only_contains_the_user_id_is_kept(_names):
+    _names["U0ALICE"] = "U0ALICE (contractor)"
+    p = si.sender_principal(ALICE_IDS)
+    assert p is not None and p.display.name == "U0ALICE (contractor)"
+
+
 def test_display_names_lose_control_and_bidi_characters(_names):
     _names["U0ALICE"] = "Ali\u202ece\x07  Ex\u200bample"
     p = si.sender_principal(ALICE_IDS)
