@@ -1855,6 +1855,9 @@ class TestABusyReplyCarriesItsContext:
             pass
 
         d.handle_message = AsyncMock(side_effect=_capture)  # type: ignore[method-assign]
+        # The drain dequeues only once the session's turn has ended; a held
+        # session defers it to drain_when_free and frames nothing.
+        sess._busy = False
         asyncio.run(d._drain_queue(self._KEY))
         # Exactly one audit, from the drain's single framing.
         assert audits == ["telegram_reply_parent"]
@@ -1890,6 +1893,8 @@ class TestABusyReplyCarriesItsContext:
             pass
 
         d.handle_message = AsyncMock(side_effect=_capture)  # type: ignore[method-assign]
+        # The drain dequeues only once the session's turn has ended.
+        sess._busy = False
         asyncio.run(d._drain_queue(self._KEY))
         assert audits == ["telegram_reply_parent"]
 
