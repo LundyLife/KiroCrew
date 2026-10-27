@@ -729,7 +729,71 @@ class TestOwnProcessStartTime:
                 return size
 
         monkeypatch.setattr(pc, "_darwin_libproc_handle", lambda: _FakeLib())
+        monkeypatch.setattr(pc, "_darwin_mach_timebase", lambda: (1, 1))
         assert pc._darwin_process_cpu_nanos(4242) == 7_500_000_000
+
+    @staticmethod
+    def _taskinfo_lib(user: int, system: int):
+        class _FakeLib:
+            @staticmethod
+            def proc_pidinfo(_pid, _flavor, _arg, buf, size):
+                raw = bytearray(size)
+                raw[pc._DARWIN_PTI_TOTAL_USER_OFFSET : pc._DARWIN_PTI_TOTAL_USER_OFFSET + 8] = (
+                    user
+                ).to_bytes(8, "little")
+                raw[pc._DARWIN_PTI_TOTAL_SYSTEM_OFFSET : pc._DARWIN_PTI_TOTAL_SYSTEM_OFFSET + 8] = (
+                    system
+                ).to_bytes(8, "little")
+                buf.raw = bytes(raw)
+                return size
+
+        return _FakeLib()
+
+    def test_darwin_cpu_nanos_scales_mach_units_by_the_timebase(self, monkeypatch):
+        """``proc_taskinfo`` counts Mach time units. On Apple Silicon one unit is
+        125/3 ns, so 180M units of CPU are 7.5 s, not 0.18 s."""
+        lib = self._taskinfo_lib(168_000_000, 12_000_000)
+        monkeypatch.setattr(pc, "_darwin_libproc_handle", lambda: lib)
+        monkeypatch.setattr(pc, "_darwin_mach_timebase", lambda: (125, 3))
+        assert pc._darwin_process_cpu_nanos(4242) == 7_500_000_000
+
+    def test_darwin_cpu_nanos_without_a_timebase_is_none(self, monkeypatch):
+        """An unscaled count would be wrong by the timebase factor: refuse it."""
+        lib = self._taskinfo_lib(7_000_000_000, 500_000_000)
+        monkeypatch.setattr(pc, "_darwin_libproc_handle", lambda: lib)
+        monkeypatch.setattr(pc, "_darwin_mach_timebase", lambda: None)
+        assert pc._darwin_process_cpu_nanos(4242) is None
+
+    @staticmethod
+    def _timebase_libc(numer: int, denom: int, rc: int = 0):
+        class _FakeLibc:
+            @staticmethod
+            def mach_timebase_info(ref):
+                info = ref._obj
+                info.numer = numer
+                info.denom = denom
+                return rc
+
+        return _FakeLibc()
+
+    def test_mach_timebase_reads_numer_and_denom(self, monkeypatch):
+        libc = self._timebase_libc(125, 3)
+        monkeypatch.setattr(pc, "_darwin_sysctl_handle", lambda: libc)
+        assert pc._darwin_mach_timebase() == (125, 3)
+
+    @pytest.mark.parametrize(("numer", "denom", "rc"), [(0, 3, 0), (125, 0, 0), (125, 3, 5)])
+    def test_mach_timebase_refuses_a_zero_field_or_a_failed_call(
+        self, monkeypatch, numer, denom, rc
+    ):
+        libc = self._timebase_libc(numer, denom, rc)
+        monkeypatch.setattr(pc, "_darwin_sysctl_handle", lambda: libc)
+        assert pc._darwin_mach_timebase() is None
+
+    def test_mach_timebase_without_the_call_is_none(self, monkeypatch):
+        monkeypatch.setattr(pc, "_darwin_sysctl_handle", lambda: object())
+        assert pc._darwin_mach_timebase() is None
+        monkeypatch.setattr(pc, "_darwin_sysctl_handle", lambda: None)
+        assert pc._darwin_mach_timebase() is None
 
     def test_darwin_cpu_nanos_refuses_a_mismatched_struct_size(self, monkeypatch):
         """Same layout check as the start-time probe: a partial fill answers None."""

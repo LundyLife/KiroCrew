@@ -62,8 +62,10 @@ class ProcessStartIdentity(NamedTuple):
 # with six uint64 fields — ``pti_virtual_size``, ``pti_resident_size``,
 # ``pti_total_user``, ``pti_total_system``, ``pti_threads_user``,
 # ``pti_threads_system`` (48 bytes) — followed by twelve int32 counters (48),
-# for a struct size of 96. Only the two total-CPU fields matter here, and both
-# are already NANOSECONDS; the total size doubles as the layout check.
+# for a struct size of 96. Only the two total-CPU fields matter here; the total
+# size doubles as the layout check. Both are in MACH ABSOLUTE TIME units, not
+# nanoseconds: the two coincide on Intel (timebase 1/1), but on Apple Silicon one
+# unit is 125/3 ns, so the reader scales them by ``mach_timebase_info``.
 _DARWIN_PROC_PIDTASKINFO = 4
 _DARWIN_PROC_TASKINFO_SIZE = 96
 _DARWIN_PTI_TOTAL_USER_OFFSET = 16
@@ -274,6 +276,35 @@ def _darwin_process_start_microtime(pid: int) -> str | None:
     return identity.start_id if identity is not None else None
 
 
+class _DarwinTimebaseInfo(ctypes.Structure):
+    """``mach_timebase_info_data_t``: nanoseconds per Mach unit as numer/denom."""
+
+    _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+
+def _darwin_mach_timebase() -> tuple[int, int] | None:
+    """``(numer, denom)`` from ``mach_timebase_info``, or None when unreadable.
+
+    Read through the cached libc handle (libSystem exports the call). It is a
+    plain read of a kernel-published constant, cheap enough to ask on every
+    CPU sample, so nothing is cached here. A zero field would make the scale
+    meaningless and reads as unreadable.
+    """
+    libc = _darwin_sysctl_handle()
+    call = getattr(libc, "mach_timebase_info", None) if libc is not None else None
+    if call is None:
+        return None
+    try:
+        info = _DarwinTimebaseInfo()
+        if call(ctypes.byref(info)) != 0:
+            return None
+        if info.numer == 0 or info.denom == 0:
+            return None
+        return int(info.numer), int(info.denom)
+    except Exception:
+        return None
+
+
 def _darwin_process_cpu_nanos(pid: int) -> int | None:
     """macOS total (user+system) CPU nanoseconds of *pid* via ``libproc``.
 
@@ -281,9 +312,18 @@ def _darwin_process_cpu_nanos(pid: int) -> int | None:
     same-uid process, nothing is exec'd, and a fill size other than the exact
     struct size means the assumed layout does not hold, so the answer is
     refused rather than sliced out of the wrong place.
+
+    ``proc_taskinfo`` reports Mach time units, which are nanoseconds only on
+    Intel; the sum is scaled by ``mach_timebase_info`` so the answer is real
+    nanoseconds on Apple Silicon too. When the timebase cannot be read the
+    answer is refused for the same reason: an unscaled count would be wrong by
+    the timebase factor without saying so.
     """
     lib = _darwin_libproc_handle()
     if lib is None:
+        return None
+    timebase = _darwin_mach_timebase()
+    if timebase is None:
         return None
     try:
         buf = ctypes.create_string_buffer(_DARWIN_PROC_TASKINFO_SIZE)
@@ -304,7 +344,8 @@ def _darwin_process_cpu_nanos(pid: int) -> int | None:
             buf.raw[_DARWIN_PTI_TOTAL_SYSTEM_OFFSET : _DARWIN_PTI_TOTAL_SYSTEM_OFFSET + 8],
             "little",
         )
-        return user + system
+        numer, denom = timebase
+        return (user + system) * numer // denom
     except Exception:
         return None
 
