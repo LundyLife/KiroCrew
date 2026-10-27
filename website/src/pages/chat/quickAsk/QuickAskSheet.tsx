@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
-import { EyeOff, X } from 'lucide-react'
+import { EyeOff, Lock, Unlock, X } from 'lucide-react'
 
 import { Btn } from '../../../components/ui'
 import ErrorNotice from '../../../components/ErrorNotice'
@@ -54,7 +54,7 @@ export default function QuickAskSheet({ ask, sessionKey, mode, onCollapse }: {
     const before = document.activeElement as HTMLElement | null
     const typing = !!before && before !== document.body && (before.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(before.tagName))
     if (!typing) {
-      const first = mode === 'overlay' ? ref.current?.querySelector<HTMLElement>('input:not([type=checkbox]), button[data-primary]') : null
+      const first = mode === 'overlay' ? ref.current?.querySelector<HTMLElement>('input:not([type=checkbox]):not([readonly]), button[data-primary]') : null
       ;(first ?? ref.current)?.focus()
     }
     return () => {
@@ -95,7 +95,7 @@ export default function QuickAskSheet({ ask, sessionKey, mode, onCollapse }: {
       if (e.key !== 'Tab') return
       if (!imeLatch.claimKey(e)) return
       const items = [...el.querySelectorAll<HTMLElement>('input, button, [href], [tabindex]:not([tabindex="-1"])')]
-        .filter(n => !(n as HTMLButtonElement).disabled)
+        .filter(n => !(n as HTMLButtonElement).disabled && n.tabIndex !== -1)
       if (items.length === 0) return
       const first = items[0]
       const last = items[items.length - 1]
@@ -127,7 +127,8 @@ export default function QuickAskSheet({ ask, sessionKey, mode, onCollapse }: {
         </div>
         <div className="min-w-0 flex-1">
           <h2 id={titleId} className="text-[16px] font-semibold leading-6 text-text-strong">{askTitle(ask)}</h2>
-          <OriginLine ask={ask} className="mt-0.5" />
+          {/* The sign-in sheet shows the origin as its own read-only first field. */}
+          {!isSignInTakeover(ask) && <OriginLine ask={ask} className="mt-0.5" />}
         </div>
         <Btn type="button" className="!px-1.5 border-transparent shrink-0" onClick={onCollapse} aria-label={i18nT('pages.chat.quickAsk.not_now')} title={i18nT('pages.chat.quickAsk.not_now')} data-testid="quick-ask-not-now">
           <X size={16} aria-hidden="true" />
@@ -168,7 +169,7 @@ type Send = (action: QuickAskAction, values?: QuickAskValues) => Promise<boolean
 function AskBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; send: Send }) {
   switch (ask.kind) {
     case 'credentials': return isSignInTakeover(ask)
-      ? <TakeOverBody explainer={i18nT('pages.chat.quickAsk.sign_in_explainer')} primary={i18nT('pages.chat.quickAsk.take_over_sign_in')} busy={busy} send={send} />
+      ? <SignInBody ask={ask} busy={busy} send={send} />
       : <CredentialsBody ask={ask} busy={busy} send={send} />
     case 'text': return <TextBody ask={ask} busy={busy} send={send} />
     case 'otp': return <OtpBody ask={ask} busy={busy} send={send} />
@@ -324,6 +325,66 @@ function CredentialsBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; se
       {rem.enabled && <RememberBox host={originHost(ask.origin)} on={rem.on} setOn={rem.setOn} />}
       <SecretHint />
       <Actions primary={i18nT('pages.chat.quickAsk.fill_in_page')} busy={busy} onDecline={() => { void send('decline') }} />
+    </form>
+  )
+}
+
+/**
+ * A sign-in the gateway walks (credentials with no field bound): the person
+ * types everything here, up front, and the gateway types each value into the
+ * screen of `origin` that asks for it. Nothing here is saved anywhere. Taking
+ * over stays for what the gateway cannot fill (a passkey, a puzzle).
+ */
+function SignInBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; send: Send }) {
+  const mode = ask.steps?.username ?? 'optional'
+  const userRef = useRef<HTMLInputElement>(null)
+  const passRef = useRef<HTMLInputElement>(null)
+  useEmptyOnUnmount(userRef, passRef)
+  const https = ask.origin.toLowerCase().startsWith('https:')
+  const SiteIcon = https ? Lock : Unlock
+  const site = ask.top_origin ? i18nT('pages.chat.quickAsk.origin_inside', { origin: ask.origin, top: ask.top_origin }) : ask.origin
+  const userLabel = mode === 'required' ? i18nT('pages.chat.quickAsk.label_email_or_phone') : i18nT('pages.chat.quickAsk.label_email_or_phone_optional')
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (mode === 'required' && !userRef.current?.value.trim()) { userRef.current?.focus(); return }
+    if (!passRef.current?.value) { passRef.current?.focus(); return }
+    const username = mode === 'none' ? '' : take(userRef).trim()
+    const password = take(passRef)
+    void send('fill', { ...(username ? { username } : {}), password })
+  }
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2" noValidate data-testid="quick-ask-sign-in">
+      <Field label={i18nT('pages.chat.quickAsk.label_website')}>
+        {id => (
+          <div className="relative min-w-0" data-testid="quick-ask-origin">
+            <SiteIcon size={14} aria-hidden="true" className={`pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 ${https ? 'text-ok' : 'text-warn'}`} />
+            <input id={id} readOnly tabIndex={-1} value={site} className={`${inputCls.replace('bg-bg ', 'bg-bg-hover ')} pl-8 font-semibold text-text-strong`} data-testid="quick-ask-origin-text" />
+          </div>
+        )}
+      </Field>
+      {mode !== 'none' && (
+        <Field label={userLabel}>
+          {id => (
+            <input id={id} ref={userRef} aria-label={userLabel} className={inputCls} maxLength={VALUE_MAX} inputMode="email" autoComplete="off" autoCapitalize="none" spellCheck={false}
+              onFocus={keepInView} data-testid="quick-ask-username" />
+          )}
+        </Field>
+      )}
+      <Field label={i18nT('pages.chat.quickAsk.label_password')}>
+        {id => (
+          <input id={id} ref={passRef} aria-label={i18nT('pages.chat.quickAsk.label_password')} type="password" className={inputCls} maxLength={VALUE_MAX} autoComplete="new-password"
+            onFocus={keepInView} data-testid="quick-ask-password" />
+        )}
+      </Field>
+      <SecretHint extra={i18nT('pages.chat.quickAsk.sign_in_not_saved', { host: originHost(ask.origin) })} />
+      <Actions primary={busy ? i18nT('pages.chat.quickAsk.signing_in') : i18nT('pages.chat.quickAsk.sign_in')} busy={busy} onDecline={() => { void send('decline') }} />
+      <p className="mt-1 text-center text-[12px] text-muted">
+        {i18nT('pages.chat.quickAsk.take_over_instead_hint')}{' '}
+        <button type="button" className="cursor-pointer border-0 bg-transparent p-0 font-medium text-accent underline-offset-2 hover:underline disabled:opacity-50" disabled={busy}
+          onClick={() => { void send('take_over') }} data-testid="quick-ask-take-over">
+          {i18nT('pages.chat.quickAsk.take_over_instead')}
+        </button>
+      </p>
     </form>
   )
 }

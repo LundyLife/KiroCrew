@@ -284,7 +284,10 @@ async def test_a_same_origin_frame_binds_through_the_stream_session() -> None:
 # ── the sign-in takeover: credentials with no targets ───────────────────────
 
 
-async def test_credentials_with_no_targets_hand_the_page_over_and_hand_back_on_navigation() -> None:
+async def test_credentials_with_no_targets_hand_the_page_over_and_hand_back_on_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(qa, "STEP_WAIT_S", 0.0)
     page = _apple()
     hub, _rec, out = await _apple_ask(
         page, {"kind": "credentials", "reason": "Sign in to the Apple Store"}
@@ -294,11 +297,13 @@ async def test_credentials_with_no_targets_hand_the_page_over_and_hand_back_on_n
     wire = lh.live_event(hub.get(KEY))["ask"]  # type: ignore[arg-type]
     assert wire["kind"] == "credentials"
     assert wire["fields"] == [{"role": "region", "rect": {"x": 100, "y": 150, "w": 500, "h": 400}}]
-    # Nothing can be typed through the sheet: there is no bound field.
-    status, _body, _ = await _answer(
+    # The walk finds no field it may type into here (this fake's finder names
+    # none): nothing is written, the ask stays open, and taking over is the way on.
+    status, body, _ = await _answer(
         {"ask_id": ask.id, "action": "fill", "values": {"password": CANARY}}
     )
-    assert status == 400
+    assert (status, body["error"]) == (409, "no_field")
+    assert not ask.outcome
     status, body, _ = await _answer({"ask_id": ask.id, "action": "take_over"})
     assert (status, body) == (200, {"ok": True})
     assert hub.in_control(KEY) and ask.phase == "taken_over"

@@ -49,14 +49,22 @@ export interface QuickAsk {
   summary?: string
   /** confirm: the bound button's own text, read from the DOM, not from the agent. */
   button?: string
+  /**
+   * credentials with no field bound: the gateway walks the sign-in itself,
+   * screen by screen, on `origin` only. `username` says whether the sheet asks
+   * for one (`none`: the page showed only a password box).
+   */
+  steps?: { username: QuickAskUsername }
   /** Epoch ms after which the gateway answers `stale`. */
   expires_at: number
   phase: 'waiting' | 'taken_over'
 }
 
+export type QuickAskUsername = 'required' | 'optional' | 'none'
+
 export type QuickAskAction = 'fill' | 'decline' | 'take_over' | 'done' | 'confirm' | 'cancel'
 export interface QuickAskValues { username?: string; password?: string; text?: string; otp?: string }
-export type QuickAskError = 'origin_changed' | 'stale' | 'not_owner' | 'too_large' | 'bad_action'
+export type QuickAskError = 'origin_changed' | 'stale' | 'not_owner' | 'too_large' | 'bad_action' | 'no_field'
 export interface QuickAskAnswer { ok: boolean; outcome?: string; error?: QuickAskError | string }
 
 const KINDS: ReadonlySet<string> = new Set(['credentials', 'text', 'otp', 'human_check', 'confirm'])
@@ -100,6 +108,8 @@ export function readQuickAsk(raw: unknown): QuickAsk | null {
     })
   }
   const digits = finite(d.digits) && Number.isInteger(d.digits) && d.digits >= 4 && d.digits <= 10 ? d.digits : undefined
+  const stepsRaw = d.kind === 'credentials' && d.steps && typeof d.steps === 'object' ? (d.steps as Record<string, unknown>).username : undefined
+  const steps = stepsRaw === 'required' || stepsRaw === 'optional' || stepsRaw === 'none' ? { username: stepsRaw as QuickAskUsername } : undefined
   return {
     id: d.id,
     kind: d.kind as QuickAskKind,
@@ -111,6 +121,7 @@ export function readQuickAsk(raw: unknown): QuickAsk | null {
     ...(digits ? { digits } : {}),
     ...(typeof d.summary === 'string' ? { summary: d.summary } : {}),
     ...(typeof d.button === 'string' ? { button: d.button } : {}),
+    ...(steps ? { steps } : {}),
     expires_at: finite(d.expires_at) ? d.expires_at : 0,
     phase: d.phase === 'taken_over' ? 'taken_over' : 'waiting',
   }

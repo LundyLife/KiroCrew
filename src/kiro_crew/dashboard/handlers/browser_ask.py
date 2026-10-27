@@ -302,17 +302,31 @@ async def _act(
             # meanwhile (the turn folded it), and a late write or click must not land.
             if ask.outcome or asyncio.get_running_loop().time() >= ask.deadline:
                 return _fail(409, "stale")
-            if action == "fill":
+            if action == "fill" and ask.spec.sign_in_takeover:
+                assert values is not None
+                await qa.sign_in(probe, ask, values, getattr(stream, "frames", None))
+                outcome = qa.SUBMITTED
+            elif action == "fill":
                 assert values is not None
                 await qa.fill(probe, ask, values)
                 outcome = qa.FILLED
             else:  # confirm: exactly one click, then the ask is spent
                 await qa.click_once(probe, ask)
                 outcome = qa.CONFIRMED
-    except qa.AskError:
+    except qa.AskError as exc:
+        if exc.code == qa.NO_FIELD:
+            # The walk found nothing to type into: the ask stays open, so the person
+            # can take over (a passkey, a puzzle) or try again. Values are gone.
+            _audit("browser_ask_answer", "no_field", "credentials:fill")
+            return _fail(409, qa.NO_FIELD)
+        if ask.outcome:
+            return _fail(409, "stale")
         # Nothing about why rides on the answer: the page moved, or would not take it.
         await _finish(hub, key, ask, action, qa.ORIGIN_CHANGED)
         return _fail(409, qa.ORIGIN_CHANGED)
+    finally:
+        if values is not None:
+            values.clear()  # the person's values die with this answer
     await _finish(hub, key, ask, action, outcome)
     return _ok(outcome=outcome)
 

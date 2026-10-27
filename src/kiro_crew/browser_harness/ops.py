@@ -547,7 +547,8 @@ async def _snapshot(ctx: OpContext, _args: dict[str, Any]) -> dict[str, Any]:
         out["note"] = (
             f"{unread} cross-origin iframe(s) could not be read, so their fields have no "
             "refs. To sign in there, use `ask` kind credentials with no targets: the user "
-            "signs in on the page themselves. Never ask for a password in chat."
+            "types into Kiro's sheet and the browser fills the site where it can, else "
+            "they sign in on the page themselves. Never ask for a password in chat."
         )
     if data.get("error"):
         out["partial"] = str(data["error"])

@@ -6,7 +6,10 @@ click that buys something -- and gets back ONE non-secret outcome word.
 
 The invariant everything here serves: a value the person types reaches only the
 element the ask was bound to, on the origin it was bound to, and nothing the
-agent can read ever contains it. So:
+agent can read ever contains it. A sign-in with no targets (:func:`sign_in`) is
+bound to the origin alone: the gateway finds each field itself, screen by
+screen, with the same checks, and stops the moment the tab leaves that site.
+So:
 
 * The ask is BOUND when it is made: the page's committed top frame (id, loader,
   origin from the frame URL) and each target's ``backendNodeId``. A target in
@@ -50,7 +53,8 @@ ROLES: dict[str, tuple[tuple[str, bool], ...]] = {
 TEXT_LABELS = frozenset({"name", "email", "username", "phone", "other"})
 #: The answer actions each kind accepts ("cancel" and "decline" fit every kind).
 ACTIONS: dict[str, frozenset[str]] = {
-    # take_over/done: only the sign-in takeover (credentials with no targets).
+    # take_over/done: only the sign-in walk (credentials with no targets), whose
+    # way out for a passkey or a puzzle is the person's own hands on the page.
     "credentials": frozenset({"fill", "take_over", "done", "decline", "cancel"}),
     "text": frozenset({"fill", "decline", "cancel"}),
     "otp": frozenset({"fill", "decline", "cancel"}),
@@ -59,6 +63,10 @@ ACTIONS: dict[str, frozenset[str]] = {
 }
 
 FILLED = "filled"
+#: A sign-in the gateway walked: every field typed and the last one submitted.
+SUBMITTED = "submitted"
+#: The sign-in walk found no field to type into in time (the ask stays open).
+NO_FIELD = "no_field"
 DECLINED = "declined"
 PASSED = "passed"
 CONFIRMED = "confirmed"
@@ -79,6 +87,13 @@ OTP_DIGITS_MAX = 10
 #: The answer route's caps.
 ANSWER_BODY_MAX = 8 * 1024
 VALUE_MAX = 1024
+
+#: The sign-in walk: how long one screen may take to show its field, how often
+#: the page is looked at meanwhile, and when a username screen that did not move
+#: on after Enter gets its Next button clicked instead.
+STEP_WAIT_S = 20.0
+STEP_POLL_S = 0.4
+STEP_NUDGE_S = 3.0
 
 PHASE_WAITING = "waiting"
 PHASE_TAKEN_OVER = "taken_over"
@@ -127,7 +142,12 @@ class AskSpec:
 
     @property
     def sign_in_takeover(self) -> bool:
-        """Credentials with no targets: the person signs in on the page itself."""
+        """Credentials with no targets: a sign-in the GATEWAY walks (:func:`sign_in`).
+
+        The person types username and password into the sheet; the gateway finds
+        each field on the bound origin itself, one screen at a time. Taking over
+        the page stays the way out for what it cannot fill (a passkey, a puzzle).
+        """
         return self.kind == "credentials" and not self.targets
 
     @property
@@ -272,6 +292,10 @@ class QuickAsk:
     target_id: str = ""
     #: One answer at a time: a double-clicked Fill runs once.
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    #: The sign-in walk: whether the sheet asks for a username (``required``: the
+    #: page showed a username box; ``none``: it showed only a password box;
+    #: ``optional``: it showed neither yet).
+    username_mode: str = ""
 
     def __post_init__(self) -> None:
         # A top-frame ask: the asked frame IS the top frame.
@@ -317,6 +341,8 @@ class QuickAsk:
         if self.top_origin and self.top_origin != self.origin:
             # Shown as "<origin> (inside <top_origin>)": both from the browser.
             out["top_origin"] = self.top_origin
+        if self.spec.sign_in_takeover:
+            out["steps"] = {"username": self.username_mode or "optional"}
         if self.spec.kind == "otp":
             out["digits"] = self.spec.digits
         if self.spec.kind == "confirm":
@@ -475,6 +501,64 @@ _REGION_JS = """(() => {
   }
   return { region: best, vw: innerWidth, vh: innerHeight };
 })()"""
+
+#: The sign-in walk's field finder: the first shown password box, the best
+#: username box, or the screen's Next / Sign in button, as an element (never a
+#: value). Run in the frame's isolated world, so page script cannot steer it, and
+#: every element it names is then checked by :data:`_INSPECT_JS` like a target.
+_FIND_JS = """(function (want) {
+  var els = [];
+  var collect = function (root, depth) {
+    var all = root.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      els.push(all[i]);
+      if (all[i].shadowRoot && depth < 4) collect(all[i].shadowRoot, depth + 1);
+    }
+  };
+  collect(document, 0);
+  var shown = function (el) {
+    var r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2 || r.bottom <= 0 || r.right <= 0) return false;
+    if (r.top >= innerHeight || r.left >= innerWidth) return false;
+    if (el.disabled || el.readOnly || el.getAttribute('aria-hidden') === 'true') return false;
+    var cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity || '1') > 0.05;
+  };
+  var TEXT = { '': 1, text: 1, email: 1, tel: 1 };
+  var USERISH = /user|e-?mail|login|identifier|account|phone|mobile/i;
+  var NEXT = /^(next|continue|sign ?in|log ?in|submit)\\b/i;
+  var pass = null, user = null, best = 0, btn = null;
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    if (el.tagName !== 'INPUT' || !shown(el)) continue;
+    var type = String(el.type || '').toLowerCase();
+    if (type === 'password') { if (!pass) pass = el; continue; }
+    if (!TEXT[type]) continue;
+    var ac = String(el.getAttribute('autocomplete') || '');
+    var named = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder].join(' ');
+    var score = /username|email/i.test(ac) ? 3 : (type === 'email' || type === 'tel' || USERISH.test(named)) ? 2 : 0;
+    if (score > best) { best = score; user = el; }
+  }
+  if (want === 'password') return pass;
+  if (want === 'username') return user;
+  var near = pass || user;
+  var form = near && near.form;
+  var pool = form ? form.querySelectorAll('button, input[type=submit], [role=button]') : els;
+  for (var j = 0; j < pool.length; j++) {
+    var b = pool[j], tag = b.tagName;
+    if (tag !== 'BUTTON' && !(tag === 'INPUT' && b.type === 'submit') && b.getAttribute('role') !== 'button') continue;
+    if (!shown(b)) continue;
+    var words = (tag === 'INPUT' ? b.value : (b.innerText || b.textContent || '')).replace(/\\s+/g, ' ').trim();
+    if ((form && b.type === 'submit') || NEXT.test(words)) { btn = b; break; }
+  }
+  return btn;
+})"""
+
+#: Does the bound element still hold focus (through open shadow roots)?
+_FOCUSED_JS = """function () {
+  var root = this.getRootNode ? this.getRootNode() : document;
+  return root.activeElement === this;
+}"""
 
 _WORLD = "kirocrew_quick_ask"
 
@@ -656,6 +740,25 @@ class PageProbe:
             raise AskError("cdp_failed")
         return (out.get("result") or {}).get("value")
 
+    async def find(self, ctx: int, role: str) -> int:
+        """The ``backendNodeId`` :data:`_FIND_JS` names for *role* in world *ctx*, else 0."""
+        found = await self._send(
+            "Runtime.evaluate",
+            {"expression": f"{_FIND_JS}({role!r})", "contextId": ctx, "returnByValue": False},
+        )
+        obj = (found.get("result") or {}).get("objectId")
+        if not obj:
+            return 0
+        try:
+            desc = await self._send("DOM.describeNode", {"objectId": obj})
+        finally:
+            try:
+                await self._send("Runtime.releaseObject", {"objectId": obj})
+            except AskError:
+                pass
+        node = (desc.get("node") or {}).get("backendNodeId")
+        return node if isinstance(node, int) else 0
+
     async def inspect(self, node: int, ctx: int) -> dict[str, Any]:
         info = await self.call(node, ctx, _INSPECT_JS)
         if not isinstance(info, dict):
@@ -814,7 +917,7 @@ async def bind_ask(probe: PageProbe, spec: AskSpec, scale: float, frames: Any = 
     top_ctx = await top.world(top_id)
     s = scale if scale > 0 else 1.0
     if spec.sign_in_takeover:
-        return await _bind_sign_in(top, spec, s, top_id, top_loader, top_origin, top_ctx)
+        return await _bind_sign_in(top, spec, s, top_id, top_loader, top_origin, top_ctx, frames)
     order = [role for role, _ in ROLES[spec.kind] if role in spec.targets]
     located = [(role, *await _locate(top, frames, spec.targets[role])) for role in order]
     frame_id = located[0][3] or top_id
@@ -883,8 +986,20 @@ async def _bind_sign_in(
     top_loader: str,
     top_origin: str,
     top_ctx: int,
+    frames: Any = None,
 ) -> QuickAsk:
-    """The sign-in takeover: no field is bound, only the page and the box to zoom on."""
+    """The sign-in walk: bound to an ORIGIN, not to nodes (the fields come screen by screen).
+
+    The origin is the frame's that shows a sign-in field now (the top frame's, or
+    one iframe's, shown as "inside" the page), else the top frame's. Every write
+    the walk makes lands only on that origin, in a tab still on ``top_origin``.
+    The region is the box a takeover zooms on.
+    """
+    origin, mode = top_origin, "optional"
+    login = await _find_login(top, top_origin, top_origin, frames, any_origin=True)
+    if login is not None:
+        origin = login.origin
+        mode = "required" if login.user else "none"
     found = await top.evaluate(top_ctx, _REGION_JS)
     if not isinstance(found, dict):
         raise AskError("cdp_failed")
@@ -897,7 +1012,7 @@ async def _bind_sign_in(
     )
     return QuickAsk(
         spec=spec,
-        origin=top_origin,
+        origin=origin,
         frame_id=top_id,
         loader_id=top_loader,
         bindings=[Binding(role="region", node=0, rect=rect)],  # type: ignore[arg-type]
@@ -908,7 +1023,161 @@ async def _bind_sign_in(
         top_frame_id=top_id,
         top_loader_id=top_loader,
         frame_session=top.session_id,
+        username_mode=mode,
     )
+
+
+@dataclass
+class _Login:
+    """What one screen of a sign-in offers right now, every element already checked."""
+
+    probe: PageProbe
+    ctx: int
+    origin: str
+    #: ``backendNodeId`` per role (0: not on this screen) and its fresh rect.
+    user: int = 0
+    password: int = 0
+    action: int = 0
+    rects: dict[str, tuple[float, float, float, float]] = field(default_factory=dict)
+    offset: tuple[float, float] = (0.0, 0.0)
+
+
+async def _login_frames(top: PageProbe, top_id: str, frames: Any) -> list[tuple[PageProbe, str]]:
+    """``(probe, frame_id)`` of the top frame and each iframe directly under it."""
+    oopif = list(frames.frames()) if frames is not None else []
+    own = {fid for fid, _sid in oopif}
+    out = [(top, top_id)]
+    tree = await top._send("Page.getFrameTree", {})
+    for child in (tree.get("frameTree") or {}).get("childFrames") or []:
+        fid = str((child.get("frame") or {}).get("id") or "")
+        if fid and fid not in own:
+            out.append((top, fid))
+    out.extend((PageProbe(top.relay, sid), fid) for fid, sid in oopif)
+    return out
+
+
+async def _find_login(
+    top: PageProbe, top_origin: str, origin: str, frames: Any, *, any_origin: bool = False
+) -> _Login | None:
+    """The sign-in fields on *origin* (in a tab on *top_origin*) now, or ``None``.
+
+    ``origin_changed`` when the tab has left *top_origin*. Each element the finder
+    names must pass :func:`target_problem` for its role; in an iframe, the frame
+    must pass :func:`_check_frame` at those elements too. *any_origin* (binding
+    only): take the first frame that shows a field, whatever its origin.
+    """
+    top_id, _loader, now = await top.top_frame()
+    if not top_id or now != top_origin:
+        raise AskError(ORIGIN_CHANGED)
+    top_ctx = await top.world(top_id)
+    for fprobe, frame_id in await _login_frames(top, top_id, frames):
+        try:
+            if frame_id == top_id:
+                f_origin, ctx = now, top_ctx
+            else:
+                _fid, _floader, f_origin = await _frame_identity(top, fprobe, frame_id)
+                if not f_origin:
+                    continue
+            if not any_origin and f_origin != origin:
+                continue
+            if frame_id != top_id:
+                ctx = await fprobe.world(frame_id)
+            login = _Login(probe=fprobe, ctx=ctx, origin=f_origin)
+            vw = vh = 0.0
+            for role in ("password", "username", "action"):
+                node = await fprobe.find(ctx, role)
+                if not node:
+                    continue
+                info = await fprobe.inspect(node, ctx)
+                if target_problem(role, info):
+                    continue
+                setattr(login, "user" if role == "username" else role, node)
+                x, y, w, h = (float(v) for v in info["rect"])
+                login.rects[role] = (x, y, w, h)
+                vw, vh = float(info.get("vw") or 0), float(info.get("vh") or 0)
+            if not (login.user or login.password):
+                continue
+            if frame_id != top_id:
+                owner = await top.frame_owner(frame_id)
+                login.offset, _vw, _vh = await _check_frame(
+                    top, top_ctx, owner, list(login.rects.values()), vw, vh
+                )
+            return login
+        except AskError as exc:
+            if exc.code == ORIGIN_CHANGED:
+                raise
+            continue  # this frame shows nothing usable (gone, covered, see-through)
+    return None
+
+
+async def _write(login: _Login, node: int, value: str) -> None:
+    """:func:`fill`'s write, into one node the walk just checked."""
+    await login.probe._send("DOM.focus", {"backendNodeId": node})
+    await login.probe.call(node, login.ctx, _PREPARE_JS)
+    if await login.probe.call(node, login.ctx, _INSERT_JS, value) is not True:
+        raise AskError(ORIGIN_CHANGED)
+
+
+async def _press_enter(top: PageProbe, login: _Login, node: int) -> None:
+    """Enter, on the field just written, while it still holds focus. Carries no value."""
+    if await login.probe.call(node, login.ctx, _FOCUSED_JS) is not True:
+        raise AskError(ORIGIN_CHANGED)
+    key = {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}
+    await top._send("Input.dispatchKeyEvent", {"type": "keyDown", **key, "text": "\r"})
+    await top._send("Input.dispatchKeyEvent", {"type": "keyUp", **key})
+
+
+async def _click(top: PageProbe, login: _Login) -> None:
+    x, y, w, h = login.rects["action"]
+    ox, oy = login.offset
+    point = {"x": round(ox + x + w / 2, 2), "y": round(oy + y + h / 2, 2), "button": "left"}
+    await top._send("Input.dispatchMouseEvent", {"type": "mousePressed", **point, "clickCount": 1})
+    await top._send("Input.dispatchMouseEvent", {"type": "mouseReleased", **point, "clickCount": 1})
+
+
+async def sign_in(probe: PageProbe, ask: QuickAsk, values: dict[str, str], frames: Any = None) -> None:
+    """Walk a sign-in with the person's values: type each where its screen asks for it.
+
+    Each turn looks at the page afresh (:func:`_find_login`, on the bound origin
+    only): a password box takes the password (and a username box beside it the
+    username) and Enter submits; a username screen alone takes the username and
+    Enter (its Next button once, if Enter did not move it on), and the walk waits
+    for the password screen. Ends ``origin_changed`` the moment the tab leaves the
+    bound site, and :data:`NO_FIELD` when a screen shows nothing to type into in
+    :data:`STEP_WAIT_S` (the ask stays open: the person can take over). The values
+    are this call's arguments only and never leave it but as the insert's.
+    """
+    loop = asyncio.get_running_loop()
+    user = values.get("username")
+    password = values["password"]
+    user_done = user is None
+    deadline = loop.time() + STEP_WAIT_S
+    nudge_at = 0.0
+    while True:
+        if ask.outcome:
+            raise AskError(CANCELLED)  # the turn ended under the walk
+        login = await _find_login(probe, ask.top_origin, ask.origin, frames)
+        if login is not None and login.password:
+            if login.user and not user_done:
+                await _write(login, login.user, user)  # type: ignore[arg-type]
+            await _write(login, login.password, password)
+            await _press_enter(probe, login, login.password)
+            return
+        now = loop.time()
+        if login is not None and login.user:
+            if not user_done:
+                await _write(login, login.user, user)  # type: ignore[arg-type]
+                await _press_enter(probe, login, login.user)
+                user_done = True
+                deadline, nudge_at = now + STEP_WAIT_S, now + STEP_NUDGE_S
+            elif user is None:
+                raise AskError(NO_FIELD)  # the page wants a username the person left out
+            elif nudge_at and now >= nudge_at and login.action:
+                await _click(probe, login)
+                nudge_at = 0.0
+        if now >= deadline:
+            raise AskError(NO_FIELD)
+        await asyncio.sleep(STEP_POLL_S)
 
 
 def _frame_probe(top: PageProbe, ask: QuickAsk) -> PageProbe:
@@ -1049,8 +1318,10 @@ async def human_check_passed(probe: PageProbe, ask: QuickAsk) -> bool:
 
 def check_values(ask: QuickAsk, values: Any) -> dict[str, str] | None:
     """The fill's values, shaped and bounded for this ask, or ``None`` when they do not fit."""
-    if not isinstance(values, dict) or ask.spec.sign_in_takeover:
+    if not isinstance(values, dict):
         return None
+    if ask.spec.sign_in_takeover:
+        return _sign_in_values(ask, values)
     out: dict[str, str] = {}
     for b in ask.bindings:
         name = b.role
@@ -1073,6 +1344,23 @@ def check_values(ask: QuickAsk, values: Any) -> dict[str, str] | None:
     return out
 
 
+def _sign_in_values(ask: QuickAsk, values: dict[str, Any]) -> dict[str, str] | None:
+    """The sign-in walk's values: a password, and a username unless the page showed none."""
+    if set(values) - {"username", "password"}:
+        return None
+    out: dict[str, str] = {}
+    for name in ("username", "password"):
+        raw = values.get(name)
+        if raw is None and name == "username" and ask.username_mode != "required":
+            continue
+        if not isinstance(raw, str) or not raw or len(raw) > VALUE_MAX:
+            return None
+        if "\n" in raw or "\r" in raw:
+            return None
+        out[name] = raw
+    return out
+
+
 __all__ = [
     "ACTIONS",
     "ANSWER_BODY_MAX",
@@ -1088,6 +1376,7 @@ __all__ = [
     "click_once",
     "fill",
     "human_check_passed",
+    "sign_in",
     "origin_of",
     "owner_problem",
     "page_moved",

@@ -179,7 +179,9 @@ describe('quick ask: fold and reopen', () => {
     type(screen.getByTestId('quick-ask-password'), 'hunter2')
     fireEvent.keyDown(screen.getByTestId('quick-ask-sheet'), { key: 'Escape' })
     expect(screen.queryByTestId('quick-ask-sheet')).toBeNull()
-    expect(screen.getByTestId('quick-ask-inline')).toHaveTextContent(t('waiting_hint'))
+    // A sign-in folds to its own card: "Secure sign-in / Sign in to <host>", Enter.
+    expect(screen.getByTestId('quick-ask-inline')).toHaveTextContent(t('secure_sign_in'))
+    expect(screen.getByTestId('quick-ask-inline')).toHaveAccessibleName(`${t('waiting_hint')}: ${t('title_credentials', { host: 'accounts.example-identity-provider.com:8443' })}`)
     expect(writes.answer).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId('quick-ask-inline'))
     // Folding dropped what was typed: a secret never waits in a hidden box.
@@ -359,15 +361,53 @@ describe('quick ask: inside an iframe', () => {
     expect(readQuickAsk({ ...asks.credentials, top_origin: ORIGIN })?.top_origin).toBeUndefined()
   })
 
-  it('credentials with no field bound: take over to sign in, no inputs, Done hands back', async () => {
-    const signIn = { ...asks.credentials, id: 'a6', fields: [{ role: 'region', rect }] }
+  it('credentials with no field bound: the sign-in sheet asks both up front and posts them once', async () => {
+    const signIn = { ...asks.credentials, id: 'a7', fields: [{ role: 'region', rect }], steps: { username: 'required' } }
     show(signIn)
     const sheet = screen.getByTestId('quick-ask-sheet')
-    expect(sheet.querySelectorAll('input')).toHaveLength(0)
-    expect(sheet).toHaveTextContent(t('sign_in_explainer'))
-    act(() => browserLiveStore.applyFrame(frame(1)))
+    // The origin is a read-only field of its own; nothing offers to save anything.
+    expect(screen.getByTestId('quick-ask-origin-text')).toHaveValue(ORIGIN)
+    expect(screen.getByTestId('quick-ask-origin-text')).toHaveAttribute('readonly')
+    expect(sheet.querySelector('[type=checkbox]')).toBeNull()
+    expect(sheet).toHaveTextContent(t('sign_in_not_saved', { host: 'accounts.example-identity-provider.com:8443' }))
+    const user = screen.getByTestId('quick-ask-username') as HTMLInputElement
+    const pass = screen.getByTestId('quick-ask-password') as HTMLInputElement
+    expect(screen.getByLabelText(t('label_email_or_phone'))).toBe(user)
+    // A required username left empty: nothing is sent.
+    fireEvent.input(pass, { target: { value: 'pw-canary-1' } })
     fireEvent.click(screen.getByTestId('quick-ask-primary'))
-    expect(screen.getByTestId('quick-ask-primary')).toHaveTextContent(t('take_over_sign_in'))
+    expect(writes.answer).not.toHaveBeenCalled()
+    fireEvent.input(user, { target: { value: 'person@example.org' } })
+    writes.answer.mockRejectedValueOnce(Object.assign(new Error('409'), { body: '{"error":"no_field"}' }))
+    fireEvent.click(screen.getByTestId('quick-ask-primary'))
+    await waitFor(() => expect(writes.answer).toHaveBeenCalledWith({ session_key: S, ask_id: 'a7', action: 'fill', values: { username: 'person@example.org', password: 'pw-canary-1' } }))
+    expect(user.value).toBe('')
+    expect(pass.value).toBe('')
+    await waitFor(() => expect(screen.getByTestId('quick-ask-error')).toHaveTextContent(t('error_no_field')))
+    // The way out for what Kiro cannot fill.
+    fireEvent.click(screen.getByTestId('quick-ask-take-over'))
+    await waitFor(() => expect(writes.answer).toHaveBeenLastCalledWith({ session_key: S, ask_id: 'a7', action: 'take_over' }))
+  })
+
+  it('a password-only sign-in screen asks no username; the folded card reads like a sign-in', () => {
+    const signIn = { ...asks.credentials, id: 'a8', fields: [{ role: 'region', rect }], steps: { username: 'none' } }
+    show(signIn)
+    expect(screen.queryByTestId('quick-ask-username')).toBeNull()
+    expect(screen.getByTestId('quick-ask-password')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('quick-ask-not-now'))
+    const card = screen.getByTestId('quick-ask-inline')
+    expect(card).toHaveTextContent(t('secure_sign_in'))
+    expect(card).toHaveTextContent(t('title_credentials', { host: 'accounts.example-identity-provider.com:8443' }))
+    expect(card).toHaveTextContent(t('enter'))
+    expect(readQuickAsk({ ...signIn, steps: { username: 'maybe' } })?.steps).toBeUndefined()
+    expect(readQuickAsk({ ...asks.text, steps: { username: 'none' } })?.steps).toBeUndefined()
+  })
+
+  it('credentials with no field bound: take over still hands the page over, Done hands back', async () => {
+    const signIn = { ...asks.credentials, id: 'a6', fields: [{ role: 'region', rect }] }
+    show(signIn)
+    act(() => browserLiveStore.applyFrame(frame(1)))
+    fireEvent.click(screen.getByTestId('quick-ask-take-over'))
     await waitFor(() => expect(writes.answer).toHaveBeenCalledWith({ session_key: S, ask_id: 'a6', action: 'take_over' }))
     act(() => browserLiveStore.applyEvent(ev({ ...signIn, phase: 'taken_over' })))
     expect(screen.getByTestId('quick-ask-takeover')).toHaveTextContent(t('sign_in_takeover_hint'))

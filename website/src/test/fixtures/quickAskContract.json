@@ -80,11 +80,28 @@
         "summary": "Book 2 tickets, $35 total",
         "button": "Place order"
       }
+    },
+    "sign_in": {
+      "args": { "kind": "credentials", "targets": [], "reason": "Sign in to read the inbox" },
+      "wire": {
+        "id": "c0ffee0000000006",
+        "kind": "credentials",
+        "origin": "https://accounts.example.com",
+        "reason": "Sign in to read the inbox",
+        "fields": [
+          { "role": "region", "rect": { "x": 100, "y": 150, "w": 500, "h": 400 } }
+        ],
+        "frame": { "w": 1280, "h": 800 },
+        "expires_at": 1893456000000,
+        "phase": "waiting",
+        "steps": { "username": "optional" }
+      }
     }
   },
   "answers": [
     { "name": "credentials_both", "kind": "credentials", "body": { "action": "fill", "values": { "username": "octocat", "password": "hunter2-secret" } } },
     { "name": "credentials_password_only", "kind": "credentials", "body": { "action": "fill", "values": { "password": "hunter2-secret" } } },
+    { "name": "sign_in_take_over", "kind": "sign_in", "body": { "action": "take_over" } },
     { "name": "text_fill", "kind": "text", "body": { "action": "fill", "values": { "text": "me@example.com" } } },
     { "name": "otp_fill", "kind": "otp", "body": { "action": "fill", "values": { "otp": "123456" } } },
     { "name": "human_check_take_over", "kind": "human_check", "body": { "action": "take_over" } },

@@ -110,7 +110,11 @@ export function widgetField(ask: QuickAsk): QuickAskField | null {
   return ask.fields.find(f => f.role === 'widget' || f.role === 'region') ?? null
 }
 
-/** Credentials with no field bound: the person signs in on the page themselves. */
+/**
+ * Credentials with no field bound: the person types into the sheet and the
+ * gateway walks the sign-in screen by screen; taking over the page is the way
+ * out for what it cannot fill.
+ */
 export function isSignInTakeover(ask: QuickAsk): boolean {
   return ask.kind === 'credentials' && !ask.fields.some(f => f.role === 'password')
 }
@@ -150,6 +154,7 @@ export function QuickAskZoom({ zoom, children }: { zoom: CSSProperties | null; c
 
 /** What a refused answer says. The gateway's code is never shown raw. */
 export function answerErrorText(code: string): string {
+  if (code === 'no_field') return i18nT('pages.chat.quickAsk.error_no_field')
   return code === 'origin_changed' || code === 'stale'
     ? i18nT('pages.chat.quickAsk.error_page_changed')
     : i18nT('pages.chat.quickAsk.error_send_failed')
