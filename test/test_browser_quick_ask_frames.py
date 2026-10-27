@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 from test_browser_live_hub import SESSION
+from test_browser_quick_ask import sel_rows  # noqa: F401 - a fixture
 from test_browser_quick_ask import (  # noqa: F401 - the autouse fixture
     CANARY,
     KEY,
@@ -27,7 +28,6 @@ from test_browser_quick_ask import (  # noqa: F401 - the autouse fixture
     _home,
     _live,
     _poll,
-    sel_rows,  # noqa: F811 - the fixture
 )
 
 from kiro_crew.browser_harness import frames as fr
