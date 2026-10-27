@@ -319,14 +319,39 @@ const TRACK_END = '0.25rem'
 const MIN_BAR_PX = 6
 
 function Axis({ window, scale }: { window: TimelineWindow; scale: TimeScale }) {
-  const ticks = scaledTicks(window, scale)
+  const language = useLanguageGeneration()
+  const ticks = useMemo(() => scaledTicks(window, scale), [window, scale])
+  const track = useRef<HTMLSpanElement>(null)
+  const [hidden, setHidden] = useState<number[]>([])
+  // Percentage gaps alone cannot fit long, localized labels on a narrow track.
+  // Measure the painted labels, keeping room between them when the panel resizes.
+  useLayoutEffect(() => {
+    const el = track.current
+    if (!el) return
+    const measure = () => {
+      let right = -Infinity
+      const next: number[] = []
+      el.querySelectorAll<HTMLElement>('[data-crew-axis-tick]').forEach((label, i) => {
+        const box = label.getBoundingClientRect()
+        if (box.left < right + 6) next.push(i)
+        else right = box.right
+      })
+      setHidden(prev => prev.join(',') === next.join(',') ? prev : next)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    el.querySelectorAll('[data-crew-axis-tick]').forEach(label => observer.observe(label))
+    return () => observer.disconnect()
+  }, [ticks, language])
   return <div className="flex items-end gap-2 px-1 text-[10px] text-muted" aria-hidden="true">
     <span className={LABEL_COL} />
-    <span className="relative flex-1 h-4 border-b border-border">
+    <span ref={track} className="relative flex-1 h-4 border-b border-border">
       {ticks.map(({ at, pct }, i) => (
         // The first label hangs right of its tick and one near the end left of
         // it, so neither leaves the track; the rest are centred.
-        <span key={at} className={`absolute bottom-0.5 whitespace-nowrap tabular-nums ${i === 0 ? '' : pct > 90 ? '-translate-x-full' : '-translate-x-1/2'}`} style={{ left: `${pct}%` }}>
+        <span key={at} data-crew-axis-tick className={`absolute bottom-0.5 whitespace-nowrap tabular-nums ${hidden.includes(i) ? 'invisible' : ''} ${i === 0 ? '' : pct > 90 ? '-translate-x-full' : '-translate-x-1/2'}`} style={{ left: `${pct}%` }}>
           {fmtTick(at)}
         </span>
       ))}
@@ -363,8 +388,8 @@ const Lane = memo(function Lane({ lane, scale, current, onOpen }: {
   const model = laneModel(t, lane)
   // Two lines for the name before it is cut; the whole name and model are the tooltip.
   const head = <span className={`${LABEL_COL} min-w-0 text-left`} title={`${title} · ${model}`}>
-    {lane.role === 'conductor' && <span className="block text-[9px] font-bold uppercase tracking-wider crew-grad-text">{t('commandCenter.timeline_conductor')}</span>}
-    <span className="block line-clamp-2 break-words text-[12px] font-medium leading-tight text-text" data-testid="crew-timeline-title">{title}</span>
+    {lane.role === 'conductor' && <span className="block text-[10px] font-bold uppercase tracking-wider crew-grad-text">{t('commandCenter.timeline_conductor')}</span>}
+    <span className="line-clamp-2 break-words text-[12px] font-medium leading-tight text-text" data-testid="crew-timeline-title">{title}</span>
     <span className="block truncate text-[10px] text-muted" data-testid="crew-timeline-model">{model}</span>
   </span>
   const track = <span className="relative flex-1 h-7 rounded bg-bg-hover/50" aria-hidden="true" data-track-of={lane.key}>
@@ -378,8 +403,8 @@ const Lane = memo(function Lane({ lane, scale, current, onOpen }: {
         data-end-bound={bar.end_bound}
         data-width-pct={box.width.toFixed(2)}
         title={barTitle(t, bar)}
-        className={`absolute rounded-sm ${BAR_CLASS[bar.kind]} ${bar.kind === 'turn' ? 'top-1 bottom-1' : 'top-2 bottom-2'} ${bar.end_bound === 'next_row' ? 'opacity-70' : ''}`}
-        style={{ left: `${box.left}%`, width: `max(${box.width}%, ${MIN_BAR_PX}px)` }}
+        className={`absolute left-[min(var(--crew-bar-left),calc(100%_-_6px))] rounded-sm ${BAR_CLASS[bar.kind]} ${bar.kind === 'turn' ? 'top-1 bottom-1' : 'top-2 bottom-2'} ${bar.end_bound === 'next_row' ? 'opacity-70' : ''}`}
+        style={{ '--crew-bar-left': `${box.left}%`, width: `max(${box.width}%, ${MIN_BAR_PX}px)` } as React.CSSProperties}
       />
     })}
     {lane.marks.map((mark, i) => {

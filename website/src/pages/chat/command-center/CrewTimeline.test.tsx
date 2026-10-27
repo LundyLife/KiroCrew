@@ -82,6 +82,31 @@ describe('CrewTimeline', () => {
     mobile.value = false
   })
 
+  it('keeps a pixel gap between axis labels on a narrow, long-running timeline', async () => {
+    const original = HTMLElement.prototype.getBoundingClientRect
+    const boxes = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-crew-axis-tick')) return original.call(this)
+      const left = parseFloat(this.style.left) * 2
+      return { x: left, y: 0, left, right: left + 48, top: 0, bottom: 12, width: 48, height: 12, toJSON: () => ({}) } as DOMRect
+    })
+    try {
+      api.crewTimeline.mockResolvedValue({ ...DONE, ended: at(250_000) })
+      renderWith(<CrewTimeline root="root-1" viewing="root-1" active onOpen={vi.fn()} />)
+      const timeline = await screen.findByTestId('crew-timeline')
+      const labels = Array.from(timeline.querySelectorAll<HTMLElement>('[data-crew-axis-tick]'))
+      const visible = labels.filter(label => !label.classList.contains('invisible'))
+      expect(visible.length).toBeGreaterThan(1)
+      expect(visible.length).toBeLessThan(labels.length)
+      expect(visible[0]).toHaveTextContent('0s')
+      for (let i = 1; i < visible.length; i++) {
+        expect(visible[i].getBoundingClientRect().left - visible[i - 1].getBoundingClientRect().right).toBeGreaterThanOrEqual(6)
+      }
+    } finally {
+      cleanup()
+      boxes.mockRestore()
+    }
+  })
+
   it('draws a lane per session, conductor first, each with its model', async () => {
     api.crewTimeline.mockResolvedValue(DONE)
     renderWith(<CrewTimeline root="root-1" viewing="root-1" active onOpen={vi.fn()} />)
@@ -94,6 +119,7 @@ describe('CrewTimeline', () => {
     // The gateway default, named when it is known; the full name is the tooltip.
     expect(within(lanes[3]).getByTestId('crew-timeline-model')).toHaveTextContent('Default (auto)')
     expect(within(lanes[3]).getByTestId('crew-timeline-title')).toHaveClass('line-clamp-2')
+    expect(within(lanes[3]).getByTestId('crew-timeline-title')).not.toHaveClass('block')
     expect(within(lanes[3]).getByTitle('A very long worker title that needs two lines · Default (auto)')).toBeInTheDocument()
   })
 
@@ -104,7 +130,8 @@ describe('CrewTimeline', () => {
     const bars = within(worker).getAllByTestId('crew-timeline-bar')
     expect(bars.map(b => b.getAttribute('data-kind'))).toEqual(['tool', 'waiting'])
     // 10s..20s of a 60s window.
-    expect(bars[0].style.left).toBe(`${(10 / 60) * 100}%`)
+    expect(bars[0].style.getPropertyValue('--crew-bar-left')).toBe(`${(10 / 60) * 100}%`)
+    expect(bars[0]).toHaveClass('left-[min(var(--crew-bar-left),calc(100%_-_6px))]')
     expect(bars[0]).toHaveAttribute('data-end-bound', 'next_row')
     // A hand-off is one arrow from the conductor's lane to the worker's.
     const arrows = screen.getAllByTestId('crew-timeline-handoff')

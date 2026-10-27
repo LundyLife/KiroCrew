@@ -590,7 +590,9 @@ and timeline lane reopen it from its saved transcript (`reopenCrewWorker`, the
 History resume), listed under its root again. A **List | Timeline**
 switch on top (List by default; none on a phone, where the panel is a sheet
 and shows the list only, by the owner's decision) swaps the cards for the
-timeline (`CrewTimeline`): lanes with the name on up to two lines (the full name
+timeline (`CrewTimeline`): axis labels keep a measured 6px gap when the panel
+resizes, including long localized minute labels, and a minimum-width bar at the
+end stays inside its track. Lanes have the name on up to two lines (the full name
 and model are the tooltip) and the model under it (`model_source`: `served` when
 the backend reported it, `chosen` for the session's own pick, else `default`,
 shown as "Default (auto)" with the gateway's `agent.model`, and the gap
@@ -689,7 +691,12 @@ worker in the MAIN pane like any session with the Workers tab in front of its
 panel; on a phone the panel sheet closes. The worker view's header is a
 breadcrumb (`CrewWorkerBreadcrumb`: ghost, root title, worker, status; for a worker a
 sub-conductor dispatched, root title › sub-conductor › worker, the crumbs above the
-worker being buttons that open those sessions and the middle one truncating first) with
+worker being buttons that open those sessions and the middle one truncating first).
+The root's gradient clips only its title span, never the button containing the
+solid ghost badge, so the badge's own background paints independently. On desktop
+with the sessions list collapsed, the header keeps the title row's 60px left inset
+to clear the stationary sessions toggle; on a phone or beside an open list it
+keeps its normal 16px inset. The header has
 "Back to main chat" (with the root's tab closed: its saved title and the worker's
 real group, both read from saved data by the worker list, which answers a closed
 root with `root_closed: true` and `root_title`; a line saying the conductor is

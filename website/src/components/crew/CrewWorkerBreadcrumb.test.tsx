@@ -28,6 +28,16 @@ function renderCrumb() {
 }
 
 describe('CrewWorkerBreadcrumb on a phone', () => {
+  it('clips the gradient to the title, never the button containing the ghost', () => {
+    renderCrumb()
+    const root = screen.getByTestId('crew-breadcrumb-root')
+    expect(root).not.toHaveClass('crew-grad-text', 'crew-eyebrow-text')
+    expect(screen.getByText('New Teammate Welcome Kit')).toHaveClass('crew-grad-text')
+    const badge = screen.getByTestId('crew-ghost-badge')
+    expect(badge.closest('.crew-grad-text, .crew-eyebrow-text')).toBeNull()
+    expect(screen.getByTestId('kiro-ghost-mark').closest('.crew-grad-text, .crew-eyebrow-text')).toBeNull()
+  })
+
   it('keeps the root readable, names both, and keeps Back a 44px target', () => {
     renderCrumb()
     const rootCrumb = screen.getByTestId('crew-breadcrumb-root')

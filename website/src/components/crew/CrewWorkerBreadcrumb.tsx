@@ -65,9 +65,9 @@ export function CrewWorkerBreadcrumb({ root, worker }: { root: string; worker: C
             tooltip. Below that the worker's name gives way, not the root's. */}
         {/* Each crumb above the worker is a button that opens that session; the
             root's opens the main chat, as Back does. */}
-        <button type="button" onClick={back} title={rootTitle} className="flex items-center gap-1.5 min-w-[5.5rem] max-w-[45%] shrink text-[13px] crew-grad-text font-medium bg-transparent border-none p-0 cursor-pointer hover:underline" data-testid="crew-breadcrumb-root">
+        <button type="button" onClick={back} title={rootTitle} className="flex items-center gap-1.5 min-w-[5.5rem] max-w-[45%] shrink text-[13px] font-medium bg-transparent border-none p-0 cursor-pointer hover:underline" data-testid="crew-breadcrumb-root">
           <CrewGhostBadge size={18} />
-          <span className="truncate">{rootTitle}</span>
+          <span className="crew-grad-text truncate">{rootTitle}</span>
         </button>
         <ChevronRight size={14} aria-hidden="true" className="text-muted shrink-0" />
         {via && <>

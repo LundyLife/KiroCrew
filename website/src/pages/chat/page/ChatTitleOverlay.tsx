@@ -105,7 +105,7 @@ export default function ChatTitleOverlay({
             row on every width (on a phone it sits under the shell bar), so whose
             worker this is and the way back are always on screen. */}
         {currentSlot?.crew_root && (
-          <div className="relative px-4 pt-[9px] pb-2 flex items-center bg-bg border-b border-border" data-testid="crew-worker-header">
+          <div className={`relative pr-4 ${!isMobile && embedMode !== 'chat' && filteredSlots.length > 0 && !sidebarOpen ? 'pl-[60px]' : 'pl-4'} pt-[9px] pb-2 flex items-center bg-bg border-b border-border`} data-testid="crew-worker-header">
             <CrewWorkerBreadcrumb root={currentSlot.crew_root} worker={currentSlot} />
             {/* The panel's open control, which the title row carries and the
                 breadcrumb replaces: with the panel closed, one click brings the

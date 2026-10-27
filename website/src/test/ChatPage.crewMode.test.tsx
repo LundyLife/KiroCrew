@@ -195,6 +195,13 @@ describe('Crew Mode on ChatPage', () => {
     expect(screen.getByTestId('crew-mode-composer-chip')).toHaveTextContent('Crew Mode')
   })
 
+  it('keeps the crew badge clear of the stationary sessions toggle', async () => {
+    await renderWith({ messages: [{ role: 'user', content: 'do part 2' }], agent: 'kirocrew-worker', agentKind: 'template', createdBy: 'root-1', crewRoot: 'root-1', slotKeys: ['slot-a', 'root-1'] })
+    expect(screen.getByRole('button', { name: 'Show sessions sidebar' })).toBeInTheDocument()
+    expect(screen.getByTestId('crew-worker-header')).toHaveClass('pl-[60px]')
+    expect(within(screen.getByTestId('crew-worker-header')).getByTestId('crew-ghost-badge').closest('.crew-grad-text')).toBeNull()
+  })
+
   it('opens a worker like a session: breadcrumb and Back to main chat', async () => {
     const store = await renderWith({ messages: [{ role: 'user', content: 'do part 2' }], agent: 'kirocrew-worker', agentKind: 'template', createdBy: 'root-1', crewRoot: 'root-1', slotKeys: ['slot-a', 'root-1'] })
     const crumb = screen.getByTestId('crew-worker-breadcrumb')
