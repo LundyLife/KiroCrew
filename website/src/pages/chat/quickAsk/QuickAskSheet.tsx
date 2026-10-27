@@ -358,7 +358,7 @@ function SignInBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; send: S
         {id => (
           <div className="relative min-w-0" data-testid="quick-ask-origin">
             <SiteIcon size={14} aria-hidden="true" className={`pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 ${https ? 'text-ok' : 'text-warn'}`} />
-            <input id={id} readOnly tabIndex={-1} value={site} className={`${inputCls.replace('bg-bg ', 'bg-bg-hover ')} pl-8 font-semibold text-text-strong`} data-testid="quick-ask-origin-text" />
+            <input id={id} readOnly tabIndex={-1} value={site} aria-label={i18nT('pages.chat.quickAsk.label_website')} className={`${inputCls.replace('bg-bg ', 'bg-bg-hover ')} pl-8 font-semibold text-text-strong`} data-testid="quick-ask-origin-text" />
           </div>
         )}
       </Field>

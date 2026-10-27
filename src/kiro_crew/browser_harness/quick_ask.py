@@ -1140,7 +1140,9 @@ async def _click(top: PageProbe, login: _Login) -> None:
     await top._send("Input.dispatchMouseEvent", {"type": "mouseReleased", **point, "clickCount": 1})
 
 
-async def sign_in(probe: PageProbe, ask: QuickAsk, values: dict[str, str], frames: Any = None) -> None:
+async def sign_in(
+    probe: PageProbe, ask: QuickAsk, values: dict[str, str], frames: Any = None
+) -> None:
     """Walk a sign-in with the person's values: type each where its screen asks for it.
 
     Each turn looks at the page afresh (:func:`_find_login`, on the bound origin

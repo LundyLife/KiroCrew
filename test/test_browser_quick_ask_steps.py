@@ -267,7 +267,9 @@ async def test_nothing_on_the_page_yet_makes_the_username_optional() -> None:
 
 def _store_with_frames(page: LoginPage) -> None:
     page.frame.update(url="https://store.example.com/checkout")
-    page.add_frame("F2", "https://id.example.com/signin", session=CHILD, content=(100, 200, 400, 300))
+    page.add_frame(
+        "F2", "https://id.example.com/signin", session=CHILD, content=(100, 200, 400, 300)
+    )
 
 
 async def test_a_sign_in_iframe_binds_its_origin_and_is_walked_through_its_session() -> None:
@@ -290,7 +292,9 @@ async def test_a_sign_in_iframe_binds_its_origin_and_is_walked_through_its_sessi
 async def test_a_password_box_in_another_origins_frame_is_never_typed_into() -> None:
     page = LoginPage()
     _store_with_frames(page)
-    page.add_frame("F3", "https://ads.example.net/promo", session="ADS", content=(100, 520, 400, 200))
+    page.add_frame(
+        "F3", "https://ads.example.net/promo", session="ADS", content=(100, 520, 400, 200)
+    )
     user, _password = _two_step(page, frame="F2")
     decoy = page.add("x1", frame="F3", type="password", rect=[10, 10, 300, 30])
 
