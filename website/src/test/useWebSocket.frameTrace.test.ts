@@ -1132,9 +1132,9 @@ const EXPECTED_FRAMES: Record<string, string[]> = {
   ],
   "refresh with history": [
     'action dashboard/triggerRefresh undefined',
-    'query invalidateQueries ["cron-jobs"]',
-    'query invalidateQueries ["crons"]',
-    'query invalidateQueries ["cron-history-all"]',
+    'query invalidateQueries ["cron-jobs"] <predicate>',
+    'query invalidateQueries ["crons"] <predicate>',
+    'query invalidateQueries ["cron-history-all"] <predicate>',
     'query invalidateQueries ["agents-installed"]',
     'query invalidateQueries ["kirocrew-agents"]',
     'query invalidateQueries ["default-agent"]',
@@ -1427,6 +1427,7 @@ const EXPECTED_FRAMES: Record<string, string[]> = {
     'query invalidateQueries ["agent-resolved-model"]',
     'query invalidateQueries ["artifacts"]',
     'query invalidateQueries ["artifact-folders"]',
+    'action dashboard/triggerCronRefresh undefined',
     'action dashboard/triggerRefresh undefined',
     'query invalidateQueries ["cron-jobs"]',
     'query invalidateQueries ["crons"]',
@@ -1441,6 +1442,7 @@ const EXPECTED_FRAMES: Record<string, string[]> = {
     'query invalidateQueries ["agent-resolved-model"]',
     'query invalidateQueries ["artifacts"]',
     'query invalidateQueries ["artifact-folders"]',
+    'action dashboard/triggerCronRefresh undefined',
   ],
   "update_progress": [
     'action dashboard/setUpdateProgress {"step":"downloading","detail":"1/2"}',
