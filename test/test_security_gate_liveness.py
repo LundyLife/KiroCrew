@@ -532,7 +532,11 @@ def _url_payload_command(n: int) -> str:
 #: substitution may expand to nothing in the program word, and
 #: ``#`` / ``<<`` inside an unpaired ``${…}`` / ``$[…]`` open no comment or heredoc.
 #: Each command is read with and without that tracking. Deny-only: no allow widened.
-_PACKAGE_LINE_BUDGET = 32_635
+#:
+#: Raised by 2, from 32,635, for the gateway checkout's git-control write fence in
+#: ``paths``: one import and one ``or`` clause on the write gate. The matcher lives
+#: outside the package (``kiro_crew.sandbox_git_control``).
+_PACKAGE_LINE_BUDGET = 32_637
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
