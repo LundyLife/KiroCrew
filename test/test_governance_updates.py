@@ -544,7 +544,10 @@ class TestGitExecNeutralizers:
         pinned = self._pinned()
         assert pinned["core.fsmonitor"] == "false"
         assert pinned["core.hooksPath"] == os.devnull
-        assert pinned["credential.helper"] == ""
+        # `credential.helper` is deliberately NOT pinned: pinning it to "" is a
+        # list reset that also clears the operator's trusted global helper. A
+        # repo-local one is refused instead (test below).
+        assert "credential.helper" not in pinned
         assert pinned["protocol.ext.allow"] == "never"
         assert pinned["diff.external"] == ""
 
@@ -565,7 +568,6 @@ class TestGitExecNeutralizers:
             "core.pager",
             "core.editor",
             "sequence.editor",
-            "credential.helper",
             "diff.external",
             "gpg.program",
             "uploadpack.packObjectsHook",
@@ -1562,12 +1564,20 @@ class TestRepoExecConfigRefusal:
     def test_namespaced_credential_helper_is_refused(self, tmp_path):
         """`credential.<url>.helper` is per-URL, so pinning the bare key misses it.
 
-        The pinned `credential.helper` does not reach a per-URL form, and the URL
-        is repo-chosen, so there is no key name to override — refuse instead.
+        The bare `credential.helper` refusal does not reach a per-URL form, and
+        the URL is repo-chosen, so there is no key name to override — refuse it.
         """
         repo = _init_repo(tmp_path / "cred")
         _git_config(repo, "--local", "credential.https://example.invalid.helper", "!sh -c ':'")
         assert "credential" in update_governance.repo_exec_config_reason(repo)
+
+    def test_a_repo_local_bare_credential_helper_is_refused(self, tmp_path):
+        """The bare `credential.helper` is an exec vector (`!command`); a
+        repo-local one is refused (not pinned to "", which would clear the
+        operator's trusted global helper and break an authenticating fetch)."""
+        repo = _init_repo(tmp_path / "credbare")
+        _git_config(repo, "--local", "credential.helper", "!sh -c ':'")
+        assert "credential.helper" in update_governance.repo_exec_config_reason(repo)
 
     def test_unreadable_config_refuses(self, monkeypatch):
         """Cannot prove a repo driver-free, so do not proceed."""
@@ -1827,13 +1837,34 @@ class TestGitCommandEnv:
         assert keys["core.fsmonitor"] == "false"
         assert keys["core.hooksPath"] == os.devnull
 
-    def test_unrelated_environment_survives(self, monkeypatch):
-        """PATH and friends must come through, or git does not run at all."""
-        monkeypatch.setenv("PATH", "/usr/bin")
+    def test_path_is_pinned_to_the_trusted_system_dirs(self, monkeypatch):
+        """PATH is REPLACED with the trusted dirs, not inherited.
+
+        An inherited PATH can lead with an agent-writable directory, and git
+        resolves a transport helper (`<helper>::`), `ssh`, and bare-name config
+        values off it at exec time. So the env pins PATH to the same trusted
+        directories the binary resolver uses; a non-trusted leading entry is
+        dropped rather than carried through.
+        """
+        from kiro_crew import platform_compat
+
+        monkeypatch.setenv("PATH", f"/agent/writable{os.pathsep}/usr/bin")
         monkeypatch.setenv("SOME_UNRELATED_VAR", "keep-me")
         env = update_governance.git_command_env()
-        assert env["PATH"] == "/usr/bin"
+        trusted = platform_compat.trusted_system_path()
+        if trusted is not None:  # POSIX
+            assert env["PATH"] == trusted
+            assert "/agent/writable" not in env["PATH"]
+        # Everything that is not a hazard still comes through.
         assert env["SOME_UNRELATED_VAR"] == "keep-me"
+
+    def test_remote_helpers_and_git_proxy_are_closed(self, monkeypatch):
+        """Only built-in transports, and no repo-named git proxy, reach a fetch."""
+        monkeypatch.delenv("GIT_ALLOW_PROTOCOL", raising=False)
+        monkeypatch.delenv("GIT_PROXY_COMMAND", raising=False)
+        env = update_governance.git_command_env()
+        assert env["GIT_ALLOW_PROTOCOL"] == "file:git:ssh:http:https"
+        assert env["GIT_PROXY_COMMAND"] == ""
 
     def test_a_merge_would_not_have_worked(self):
         """Documents WHY this builds instead of merging, as an assertion.

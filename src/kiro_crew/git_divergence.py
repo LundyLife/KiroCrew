@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -112,18 +113,28 @@ def parse_divergence_counts(output: str) -> DivergenceCounts | None:
 
 
 async def count_divergence(
-    repo: str | Path, upstream: str, *, timeout: float = DIVERGENCE_TIMEOUT_SEC
+    repo: str | Path,
+    upstream: str,
+    *,
+    timeout: float = DIVERGENCE_TIMEOUT_SEC,
+    git: str = "git",
+    env: Mapping[str, str] | None = None,
 ) -> DivergenceCounts | DivergenceUnreadable:
     """Count HEAD's divergence from *upstream* in *repo*, off the event loop.
 
     stderr is discarded: the async callers are HTTP handlers whose responses
     carry their own machine-readable codes, so git's message has no reader.
+
+    *git* and *env* let a caller that already hardened its other git calls (a
+    trusted binary, :func:`~kiro_crew.platform.update_governance.git_command_env`)
+    run this one the same way. ``None`` inherits the process environment.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git",
+            git,
             *divergence_count_args(upstream),
             cwd=repo,
+            env=None if env is None else dict(env),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
