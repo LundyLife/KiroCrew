@@ -26,6 +26,7 @@ type Server = {
   transport: string
   denylisted: boolean
   pooling_blocked_by_env?: boolean
+  private_backend?: boolean
 }
 
 function server(over: Partial<Server> = {}): Server {
@@ -1510,6 +1511,30 @@ describe('state chip honours the rewriter, not just the allowlist', () => {
 
     mount()
     expect(await screen.findByText('shared', { selector: 'span' })).toBeTruthy()
+    expect(screen.queryByText('direct (env)', { selector: 'span' })).toBeNull()
+  })
+
+  it('reads a private backend as stub, not shared, with sharing on', async () => {
+    // A server whose env names a vault secret is wrapped onto a backend of its
+    // own. The global switch being on does not make it shared.
+    vi.spyOn(api, 'mcpGatewayStatus').mockResolvedValue(
+      status({ enabled: true, stub: ['alpha-mcp'], stub_count: 1 }) as never,
+    )
+    vi.spyOn(api, 'mcpGatewayServers').mockResolvedValue({
+      servers: [
+        server({
+          name: 'alpha-mcp',
+          stub: true,
+          in_allowlist: true,
+          pooling_blocked_by_env: false,
+          private_backend: true,
+        }),
+      ],
+    } as never)
+
+    mount()
+    expect(await screen.findByText('stub', { selector: 'span' })).toBeTruthy()
+    expect(screen.queryByText('shared', { selector: 'span' })).toBeNull()
     expect(screen.queryByText('direct (env)', { selector: 'span' })).toBeNull()
   })
 
