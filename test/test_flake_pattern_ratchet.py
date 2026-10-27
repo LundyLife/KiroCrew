@@ -527,6 +527,200 @@ def _k18_xfail_strict_false(module: _Module) -> Iterable[ast.AST]:
                     break
 
 
+def _kiro_crew_module_names(module: _Module) -> frozenset[str]:
+    """Lowercase names imported from ``kiro_crew.*`` at module scope.
+
+    Covers both ``from kiro_crew.X import mod`` (ImportFrom) and
+    ``import kiro_crew.X.mod as mod`` (Import with alias).  A kiro_crew module
+    import binds a persistent object: assigning a live asyncio Task or TimerHandle
+    to one of its attributes creates state that survives the test's event loop.
+    """
+    names: set[str] = set()
+    for node in module.tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module == "kiro_crew" or node.module.startswith("kiro_crew."):
+                for alias in node.names:
+                    name = alias.asname or alias.name
+                    if name and name[0].islower():
+                        names.add(name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname and (
+                    alias.name == "kiro_crew" or alias.name.startswith("kiro_crew.")
+                ):
+                    if alias.asname[0].islower():
+                        names.add(alias.asname)
+    return frozenset(names)
+
+
+def _is_task_creating_value(node: ast.AST) -> bool:
+    """True when *node* is a call that produces an asyncio Task or TimerHandle."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        attr = func.attr
+    elif isinstance(func, ast.Name):
+        attr = func.id
+    else:
+        return False
+    return attr in ("create_task", "ensure_future", "call_later", "call_at")
+
+
+def _k16_module_async_state(module: _Module) -> Iterable[ast.AST]:
+    """Writes a Task or TimerHandle into a kiro_crew module attribute from a test
+    function, when no autouse fixture or self-cleanup guards the state.
+
+    The module object outlives the test's event loop; a stale Task in module state
+    causes the next test on the same xdist worker to hang (asyncio.gather on a Task
+    from a closed loop never resolves) or read half-initialised state.
+
+    Detects five write shapes: plain assignment, annotated assignment, container
+    ``add``/``append`` calls, indirect assignment (local var holds the task),
+    and ``monkeypatch.setattr``.  Exempts a write when:
+    - the enclosing function is an autouse fixture,
+    - an autouse or yield-bearing fixture in the same file resets that
+      ``<mod>.<attr>`` to ``None`` or calls ``.clear()`` on it, or
+    - the enclosing test function itself resets the same attribute to ``None``
+      (explicit inline cleanup).
+    """
+    kc_mods = _kiro_crew_module_names(module)
+    if not kc_mods:
+        return
+
+    # ── build autouse fixture set ──────────────────────────────────────────
+    autouse_fns: set[str] = set()
+    for node in ast.walk(module.tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            dec_text = ast.unparse(dec)
+            if "autouse" in dec_text and "True" in dec_text:
+                autouse_fns.add(node.name)
+
+    # ── collect (mod, attr) pairs reset by any fixture ────────────────────
+    reset_pairs: set[tuple[str, str]] = set()
+    for node in ast.walk(module.tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        is_autouse = node.name in autouse_fns
+        has_yield = any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(node))
+        if not (is_autouse or has_yield):
+            continue
+        for child in ast.walk(node):
+            # mod._attr = None
+            if isinstance(child, ast.Assign) and len(child.targets) == 1:
+                t = child.targets[0]
+                if (
+                    isinstance(t, ast.Attribute)
+                    and isinstance(t.value, ast.Name)
+                    and t.value.id in kc_mods
+                    and isinstance(child.value, ast.Constant)
+                    and child.value.value is None
+                ):
+                    reset_pairs.add((t.value.id, t.attr))
+            # mod._attr.clear() / .discard()
+            elif isinstance(child, ast.Expr) and isinstance(child.value, ast.Call):
+                call = child.value
+                if (
+                    isinstance(call.func, ast.Attribute)
+                    and call.func.attr in ("clear", "discard")
+                    and isinstance(call.func.value, ast.Attribute)
+                    and isinstance(call.func.value.value, ast.Name)
+                    and call.func.value.value.id in kc_mods
+                ):
+                    reset_pairs.add((call.func.value.value.id, call.func.value.attr))
+
+    def _fn_resets(fn: ast.AST, mod: str, attr: str) -> bool:
+        """Does *fn* itself set ``<mod>.<attr> = None`` anywhere in its body?"""
+        for child in ast.walk(fn):
+            if isinstance(child, ast.Assign) and len(child.targets) == 1:
+                t = child.targets[0]
+                if (
+                    isinstance(t, ast.Attribute)
+                    and isinstance(t.value, ast.Name)
+                    and t.value.id == mod
+                    and t.attr == attr
+                    and isinstance(child.value, ast.Constant)
+                    and child.value.value is None
+                ):
+                    return True
+        return False
+
+    def _task_locals(fn: ast.AST) -> frozenset[str]:
+        """Names bound to a task-creating call inside *fn*."""
+        names: set[str] = set()
+        for child in ast.walk(fn):
+            if isinstance(child, ast.Assign) and _is_task_creating_value(child.value):
+                for tgt in child.targets:
+                    if isinstance(tgt, ast.Name):
+                        names.add(tgt.id)
+        return frozenset(names)
+
+    def _should_yield(node: ast.AST, mod: str, attr: str, value: ast.AST) -> bool:
+        fn = module.enclosing_function(node)
+        if fn is None or getattr(fn, "name", None) in autouse_fns:
+            return False
+        task_vars = _task_locals(fn)
+        is_task = _is_task_creating_value(value) or (
+            isinstance(value, ast.Name) and value.id in task_vars
+        )
+        if not is_task:
+            return False
+        if (mod, attr) in reset_pairs:
+            return False
+        if _fn_resets(fn, mod, attr):
+            return False
+        return True
+
+    # ── 1. plain assignment: mod._attr = task / local_task_var ────────────
+    for write in module.writes:
+        if not isinstance(write, ast.Assign):
+            continue
+        for target in write.targets:
+            if (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id in kc_mods
+            ):
+                if _should_yield(write, target.value.id, target.attr, write.value):
+                    yield write
+                    break
+
+    # ── 2. annotated assignment: mod._attr: T = task ──────────────────────
+    for node in ast.walk(module.tree):
+        if not isinstance(node, ast.AnnAssign) or node.value is None:
+            continue
+        target = node.target
+        if (
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id in kc_mods
+        ):
+            if _should_yield(node, target.value.id, target.attr, node.value):
+                yield node
+
+    # ── 3. container add/append: mod._attr.add(task) / .append(...) ───────
+    for call in module.calls:
+        func = call.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr in ("add", "append", "extend")
+            and isinstance(func.value, ast.Attribute)
+            and isinstance(func.value.value, ast.Name)
+            and func.value.value.id in kc_mods
+        ):
+            continue
+        if not call.args or not _is_task_creating_value(call.args[0]):
+            continue
+        if _should_yield(call, func.value.value.id, func.value.attr, call.args[0]):
+            yield call
+
+    # ── 4. monkeypatch.setattr(mod, "_attr", task): NOT detected.
+    # monkeypatch restores the original value at teardown, so no task
+    # reference persists in module state after the test ends.
+
+
 def _parenthesized_with_as(source: bytes, starts: list[int], node: ast.AST) -> bool:
     """Whether *node* is ``with (a as b, ...):``: one pair of parentheses holds every
     item and at least one binds a name. ``with (a) as b:`` and ``with (a, b):`` are not."""
@@ -602,6 +796,7 @@ PY_TRIGGERS: dict[str, tuple[str, ...]] = {
     "K13-fixed-flush-ceiling": ("flush",),
     "K14-unpaused-crew-log-rmtree": ("rmtree",),
     "K15-parked-pool-wait": ("to_thread", "run_in_executor"),
+    "K16-module-async-state": ("create_task", "call_later", "ensure_future", "call_at"),
     "K18-xfail-strict-false": ("xfail",),
 }
 
@@ -619,6 +814,7 @@ PY_DETECTORS: dict[str, Callable[..., Iterable[ast.AST]]] = {
     "K13-fixed-flush-ceiling": _k13_fixed_flush_ceiling,
     "K14-unpaused-crew-log-rmtree": _k14_unpaused_crew_log_rmtree,
     "K15-parked-pool-wait": _k15_parked_pool_wait,
+    "K16-module-async-state": _k16_module_async_state,
     "K18-xfail-strict-false": _k18_xfail_strict_false,
 }
 
@@ -1057,6 +1253,49 @@ PY_CASES: dict[str, tuple[tuple[str, ...], str]] = {
         "    await asyncio.to_thread(work, 5)\n    await asyncio.to_thread(ev.is_set)\n"
         "    await loop.run_in_executor(None, work, 5)\n"
         "    await async_wait_until(ev.is_set)\ndef held():\n    assert ev.wait(5)\n",
+    ),
+    "K16-module-async-state": (
+        (
+            # 1. Plain assignment: create_task on imported kiro_crew module attr
+            "import asyncio\nfrom kiro_crew.apps.builtins.aws_control import hooks\n"
+            "async def test_x():\n    hooks._task = asyncio.create_task(f())\n",
+            # 2. call_later via get_running_loop()
+            "import asyncio\nfrom kiro_crew.dashboard import crewmate_feed\n"
+            "async def test_y():\n"
+            "    crewmate_feed._timer = asyncio.get_running_loop().call_later(0.4, lambda: None)\n",
+            # 3. Container add: mod._attr.add(create_task(...))
+            "import asyncio\nfrom kiro_crew.apps.builtins.aws_control import hooks\n"
+            "async def test_add():\n    hooks._pending.add(asyncio.create_task(f()))\n",
+            # 4. Plain Import alias: import kiro_crew.x.hooks as hooks
+            "import asyncio\nimport kiro_crew.apps.builtins.aws_control.hooks as hooks\n"
+            "async def test_import():\n    hooks._task = asyncio.create_task(f())\n",
+            # 5. Indirect assignment: t = create_task(); mod._attr = t
+            "import asyncio\nfrom kiro_crew.apps.builtins.aws_control import hooks\n"
+            "async def test_indirect():\n"
+            "    t = asyncio.create_task(f())\n    hooks._task = t\n",
+            # 6. Annotated assignment
+            "import asyncio\nfrom kiro_crew.apps.builtins.aws_control import hooks\n"
+            "async def test_ann():\n"
+            "    hooks._task: asyncio.Task = asyncio.create_task(f())\n",
+        ),
+        # Near misses — all count 0:
+        # autouse resets (hooks, _task) -> test_x write exempt;
+        # non-kiro_crew base -> not counted; None value -> not a task;
+        # self-cleanup (same-fn None reset) -> exempt;
+        # monkeypatch.setattr -> not detected (monkeypatch restores at teardown).
+        "import asyncio\nimport pytest\n"
+        "from kiro_crew.apps.builtins.aws_control import hooks\n"
+        "@pytest.fixture(autouse=True)\n"
+        "def _isolated():\n    hooks._task = None\n    yield\n    hooks._task = None\n"
+        "async def test_x():\n"
+        "    hooks._task = asyncio.create_task(g())  # autouse resets -> exempt\n"
+        "    client._task = asyncio.create_task(g())  # not a kc module -> exempt\n"
+        "    hooks._timer = None\n"  # None is not a task
+        "async def test_cleanup():\n"
+        "    hooks._task = asyncio.create_task(g())\n"
+        "    hooks._task = None\n"  # explicit self-cleanup -> exempt
+        "async def test_setattr(monkeypatch):\n"
+        "    monkeypatch.setattr(hooks, '_task', asyncio.create_task(g()))\n",  # not detected
     ),
     "K18-xfail-strict-false": (
         (
