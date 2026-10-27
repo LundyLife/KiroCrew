@@ -27,10 +27,10 @@ export function CrewEyebrow() {
 }
 
 /** A worker's state as a dot and a word. The word is the state, not a hint. */
-export function CrewStatusDot({ group, withLabel = true }: { group: CrewWorkerGroup; withLabel?: boolean }) {
+export function CrewStatusDot({ group, withLabel = true, className = '' }: { group: CrewWorkerGroup; withLabel?: boolean; className?: string }) {
   const label = i18nT(CREW_GROUP_LABEL_KEY[group])
   return (
-    <span data-testid="crew-status" data-group={group} className={`inline-flex items-center gap-1 text-[12px] shrink-0 ${CREW_GROUP_TONE[group]}`}>
+    <span data-testid="crew-status" data-group={group} className={`inline-flex items-center gap-1 text-[12px] shrink-0 ${CREW_GROUP_TONE[group]} ${className}`}>
       <span aria-hidden="true" className={`w-2 h-2 rounded-full ${group === 'waiting' ? 'border border-current' : 'bg-current'}`} />
       {withLabel ? <span>{label}</span> : <span className="sr-only">{label}</span>}
     </span>

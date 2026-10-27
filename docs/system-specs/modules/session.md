@@ -696,7 +696,9 @@ The root's gradient clips only its title span, never the button containing the
 solid ghost badge, so the badge's own background paints independently. On desktop
 with the sessions list collapsed, the header keeps the title row's 60px left inset
 to clear the stationary sessions toggle; on a phone or beside an open list it
-keeps its normal 16px inset. The header has
+keeps its normal 16px inset. Names can shrink at every pane width; below a 640px
+breadcrumb the status word and Back label give way to the named dot and arrow,
+so a narrow split or page zoom keeps both navigation controls in view. The header has
 "Back to main chat" (with the root's tab closed: its saved title and the worker's
 real group, both read from saved data by the worker list, which answers a closed
 root with `root_closed: true` and `root_title`; a line saying the conductor is

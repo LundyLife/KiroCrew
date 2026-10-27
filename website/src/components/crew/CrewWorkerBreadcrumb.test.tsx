@@ -41,7 +41,7 @@ describe('CrewWorkerBreadcrumb on a phone', () => {
   it('keeps the root readable, names both, and keeps Back a 44px target', () => {
     renderCrumb()
     const rootCrumb = screen.getByTestId('crew-breadcrumb-root')
-    expect(rootCrumb).toHaveClass('min-w-[5.5rem]')
+    expect(rootCrumb).toHaveClass('min-w-0', '@[18rem]/crumb:min-w-[5.5rem]')
     expect(rootCrumb).toHaveAttribute('title', 'New Teammate Welcome Kit')
     const worker = screen.getByTestId('crew-breadcrumb-worker')
     expect(worker).toHaveTextContent('First-week checklist')
@@ -52,11 +52,18 @@ describe('CrewWorkerBreadcrumb on a phone', () => {
     expect(screen.getByTestId('crew-status').querySelector('.sr-only')).not.toBeNull()
   })
 
-  it('shows the status word on a desktop header', () => {
+  it('keeps the status word accessible and yields its drawn label to a narrow pane', () => {
     mobile.value = false
-    renderCrumb()
-    expect(screen.getByTestId('crew-status').querySelector('.sr-only')).toBeNull()
-    mobile.value = true
+    try {
+      renderCrumb()
+      const label = screen.getByTestId('crew-status').querySelector('span:not([aria-hidden])')
+      expect(label).toHaveTextContent('Waiting')
+      expect(screen.getByTestId('crew-status')).toHaveClass('[&>span:last-child]:sr-only', '@[40rem]/crumb:[&>span:last-child]:not-sr-only')
+      expect(screen.getByTestId('crew-breadcrumb-worker')).not.toHaveClass('@[30rem]/crumb:shrink-0')
+      expect(screen.getByTestId('crew-back-to-conductor').querySelector('span')).toHaveClass('hidden', '@[40rem]/crumb:inline')
+    } finally {
+      mobile.value = true
+    }
   })
 
   it('says a failed worker-list read beside the status it fell back to', async () => {
