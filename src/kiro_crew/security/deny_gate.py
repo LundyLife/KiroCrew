@@ -846,7 +846,9 @@ def _deny_pattern_passes(
                 # is emitted here (and GATES the carve-out) because for a search
                 # whose verb and path land in different segments Pass 2 never
                 # matches, so this is the only place the decision is recorded.
-                if _emit_deny_exception_event(tool_name, pattern, _PERM_VERB_MENTION_MECHANISM):
+                if _emit_deny_exception_event(
+                    tool_name, pattern, _perm_verb_mechanism_for(pattern)
+                ):
                     whole_string_exception_match = True
             if not whole_string_exception_match:
                 _emit_deny_event(tool_name, pattern, lower)
@@ -1131,6 +1133,8 @@ def _perm_verb_mechanism_for(pattern: str) -> str:
     """
     if pattern in _submodule("denied_rules")._PERM_VERB_MENTION_PATTERNS:
         return _PERM_VERB_MENTION_MECHANISM
+    if pattern in _submodule("s3_direction")._S3_TRANSFER_PATTERNS:
+        return "_S3_DOWNLOAD"
     return "_DENY_EXCEPTIONS"
 
 
@@ -1151,7 +1155,14 @@ def _perm_verb_mention_narrows(
     touching any rule outside the derived set.  The set's size is deliberately
     not written down here: it is derived from the catalog, so a count in prose
     goes stale the next time a row is added or renamed.
+
+    The three ``aws s3 cp|mv|sync`` rows narrow the same way on a different
+    reading: :func:`~.s3_direction._s3_download_only`, true only for one plain
+    download command it read in full, so a command it cannot read stays denied.
     """
+    s3 = _submodule("s3_direction")
+    if pattern in s3._S3_TRANSFER_PATTERNS:
+        return s3._s3_download_only(view)
     if pattern not in _submodule("denied_rules")._PERM_VERB_MENTION_PATTERNS:
         return False
     verdict = cache.get(view)
