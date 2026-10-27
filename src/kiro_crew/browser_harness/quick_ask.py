@@ -1127,10 +1127,11 @@ def _spent(ask: QuickAsk) -> bool:
 
 async def _write(ask: QuickAsk, login: _Login, node: int, value: str) -> None:
     """:func:`fill`'s write, into one node the walk just checked, while the ask is live."""
-    if _spent(ask):
-        raise AskError(CANCELLED)
     await login.probe._send("DOM.focus", {"backendNodeId": node})
     await login.probe.call(node, login.ctx, _PREPARE_JS)
+    # Last thing before the value leaves the gateway: the ask is still live.
+    if _spent(ask):
+        raise AskError(CANCELLED)
     if await login.probe.call(node, login.ctx, _INSERT_JS, value, login.origin) is not True:
         raise AskError(ORIGIN_CHANGED)
 
