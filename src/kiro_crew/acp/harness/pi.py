@@ -173,7 +173,7 @@ _PI_MCP_SERVER_NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
 # digest over the raw bytes would read every Windows install as tampered and refuse
 # every pi session there. ``.gitattributes`` pins the checkout LF as well; the
 # normalization here is what keeps the property from resting on a repo-config line.
-PI_GATE_EXTENSION_SHA256 = "1b52635d276993cce27e940b8d75ba94fbb4155161dd6922fcc869ef681ba968"
+PI_GATE_EXTENSION_SHA256 = "19cc005240a822db00c8a4f163709571d4d24f920f202fda9e62e3633a511e67"
 
 _pi_acp_argv_cache: tuple[list[str] | None, str] | object = launch_mod._UNRESOLVED
 
@@ -690,8 +690,15 @@ def pi_mcp_handoff_payload(elements: list, nonce: str, key: bytes) -> tuple[byte
     # import depend on the crypto library's load.
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+    # pi lists a directly declared server's MCP instructions nowhere in the prompt,
+    # so the extension appends them itself: Crew's own servers' text, by name.
+    from kiro_crew.mcp_instructions import BY_SERVER
+
+    instructions = {name: BY_SERVER[name] for name in servers if name in BY_SERVER}
     iv = os.urandom(12)
-    plaintext = json.dumps({"servers": servers}, sort_keys=True).encode("utf-8")
+    plaintext = json.dumps(
+        {"servers": servers, "instructions": instructions}, sort_keys=True
+    ).encode("utf-8")
     sealed = AESGCM(key).encrypt(iv, plaintext, nonce.encode("utf-8"))
     body = {
         _PI_MCP_HANDOFF_MARKER: 1,
