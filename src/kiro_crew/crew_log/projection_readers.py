@@ -29,7 +29,6 @@ from kiro_crew.crew_log.projection_kernel import Checkpoint, advance, projection
 from kiro_crew.crew_log.projection_registry import _FOLDS
 from kiro_crew.crew_log.projection_session_log import open_session_log
 from kiro_crew.crew_log.projection_slot_memo import fold_slot_warm_revised
-from kiro_crew.crew_log.projection_work import _work_units
 from kiro_crew.crew_log.projection_workers import (
     merge_render,
     tree_seeded,
@@ -37,7 +36,7 @@ from kiro_crew.crew_log.projection_workers import (
     workers_children,
     workers_units,
 )
-from kiro_crew.crew_log.projection_workstreams import _board_closure_units, _workstreams_units
+from kiro_crew.crew_log.projection_workstreams import _own_board_units, _workstreams_units
 from kiro_crew.crew_log.schema import KIND_SESSION
 from kiro_crew.crew_log.session_tree import OpenedRecord, log_rank_of
 from kiro_crew.crew_log.store import (
@@ -251,6 +250,43 @@ def _supplemental_units(slot: str, name: str) -> "tuple[str, ...]":
     return session_units_for_slot(slot)
 
 
+#: Each slot's newest unit, keyed by the slot's unit listing it was computed from. The
+#: listing comes from the store's slot index, which re-checks a unit whose header was
+#: still unpublished when it was listed, so a unit that becomes provable later changes
+#: the key even though the root's stat does not move.
+_NEWEST_UNITS: "dict[str, tuple[tuple[Any, ...], str]]" = {}
+_NEWEST_UNITS_LIMIT = 1024
+_newest_units_guard = threading.Lock()
+
+
+def newest_unit_in_succession(slot: str) -> str:
+    """The last of :func:`units_in_succession` for *slot*, or ``""``; cached on its units.
+
+    A unit's place in the succession is written once (header, opening entry), so the
+    answer can only change when the slot's set of units does.
+    """
+    if not slot:
+        return ""
+    identity: "tuple[Any, ...]" = (str(data_home()), session_units_for_slot(slot))
+    with _newest_units_guard:
+        held = _NEWEST_UNITS.get(slot)
+    if held is not None and held[0] == identity:
+        return held[1]
+    units = units_in_succession(slot)
+    unit = units[-1] if units else ""
+    # Cached only when at most one unit lacks a readable predecessor (the chain start).
+    # A unit whose opening entry has not landed yet reads as a second start and would
+    # be ordered by the clock; caching that guess would outlive the opener's arrival.
+    settled = sum(1 for u in units if unit_opened_previous(KIND_SESSION, u) is None) <= 1
+    if unit and settled:
+        with _newest_units_guard:
+            _NEWEST_UNITS.pop(slot, None)
+            _NEWEST_UNITS[slot] = (identity, unit)
+            while len(_NEWEST_UNITS) > _NEWEST_UNITS_LIMIT:
+                _NEWEST_UNITS.pop(next(iter(_NEWEST_UNITS)))
+    return unit
+
+
 def units_in_succession(slot: str) -> "tuple[str, ...]":
     """The slot's session units ordered by DURABLE succession rather than by the clock.
 
@@ -353,14 +389,15 @@ def _slot_units_for_fold(slot: str, name: str) -> "tuple[str, ...]":
     if name == LEDGER_FOLD_NAME:
         return session_ledger.crew_log_units(slot)
     if name == "work":
-        return _work_units(slot, session_ledger.work_crew_log_units(slot))
+        # The board's OWN units and nothing else. A bound worker's report is written by
+        # the gateway into the conductor's unit as well as the worker's
+        # (``api_work_report``), so the board is complete without reading -- or walking
+        # the binds to find -- any worker's log.
+        return session_ledger.work_crew_log_units(slot)
     if name == WORKSTREAMS_FOLD_NAME:
-        # The same units the ``work`` fold reads -- the conductor's, then every bound
-        # worker's -- because one session appends its work records AND its turn closers
-        # to one crew log, so the files carrying the boards are the files carrying the
-        # spend. No wider: the fold answers for the boards THIS slot reaches, and
-        # reading a slot nothing here binds would be a scan for data no reader asked
-        # for.
+        # The board's own units, like ``work``: a bound worker's charges and a nested
+        # board's records are relayed into them (``work_relay``), so the project report
+        # needs no worker's log.
         return _workstreams_units(slot)
     if name == WORKERS_FOLD_NAME:
         # The crewmate's own units: its creates. Each worker's own log is read by that
@@ -405,12 +442,10 @@ def tree_fold_units(root: str, name: str) -> "tuple[tuple[str, ...], int]":
     """The units *name* is folded over for the tree rooted at *root*, and how many the
     selection refused.
 
-    THE THIRD KEY KIND'S unit resolver, and the reason it is a third kind: this answer is
-    not a property of the key. It walks what the record SAYS -- the root's own units,
-    every worker those units recorded a bind for, and every board those workers conduct,
-    to closure (:func:`_board_closure_units`) -- so a bind appended after the last read
-    changes the population with nothing about *root* having changed. A slot fold's units
-    come from the store's listing for one slot and cannot do that.
+    The root board's OWN units only (:func:`_own_board_units`). A nested board's records
+    are relayed up into its parent's log by the gateway (``work_relay``), so each board
+    of the tree is already in the root's units and no bind is walked and no other
+    board's log is opened to find them.
     """
     if require_name(name) not in TREE_PROJECTION_NAMES:
         # The same refusal shape ``require_name`` raises for a name the registry does not
@@ -423,7 +458,7 @@ def tree_fold_units(root: str, name: str) -> "tuple[tuple[str, ...], int]":
             code=CODE_BAD_DATA,
             field="name",
         )
-    return _board_closure_units(root)
+    return _own_board_units(root)
 
 
 def fold_tree_checkpoint(name: str, root: str) -> Checkpoint:
@@ -465,21 +500,28 @@ def fold_tree_checkpoint(name: str, root: str) -> Checkpoint:
 def read_tree_projection(root: str, name: str) -> Projection:
     """One tree-keyed projection for the tree rooted at *root*. The read a block gets.
 
-    COLD every time, and that is the posture the key kind earns rather than an omission:
-    a warm cell would be invalidated by growth in ANY member's log, including a member
-    the cell did not know existed, and there is no publisher for that event. So this fold
-    is lazy, has no bus scope, and belongs on a page load and on a refetch -- which the
-    controller contract already covers, since a gap triggers a full refetch anyway.
+    Folded over the root's own units (:func:`tree_fold_units`) in the root's warm cell,
+    the same cell a slot fold uses: a read with nothing new appended reads no entry, and
+    after a restart the fold resumes from its savepoint.
 
     Its production caller is the dashboard controller:
     :meth:`kiro_crew.dashboard.handlers.member_dashboard_fields.LivePage._read_trees`,
     reached from ``GET /api/members/{slug}/dashboard`` when the page's model binds a
-    tree fold, and again from that route's refetch. The controller calls it on arm and
-    on refetch and never from the fold worker, which is what keeps this read off the
-    thread that folds.
+    tree fold, and again from that route's refetch. It is never called from the fold
+    worker.
 
     BOTH routes that take a fold name -- the owner's per-session read and the internal
     per-unit one -- REFUSE a tree-keyed name rather than folding the one unit they
     address, so this is the only way in.
     """
-    return projection_of(fold_tree_checkpoint(require_name(name), root))
+    fold_name = require_name(name)
+    units, dropped = tree_fold_units(root, fold_name)
+    checkpoint, revision = fold_slot_warm_revised(fold_name, list(units), slot=root)
+    projected = projection_of(checkpoint, revision=revision)
+    if dropped and isinstance(projected.value, dict):
+        # The refused count belongs to this read's selection, not to the cell's state.
+        value = {**projected.value, "dropped": int(projected.value.get("dropped", 0)) + dropped}
+        projected = Projection(
+            name=projected.name, seq=projected.seq, value=value, revision=projected.revision
+        )
+    return projected

@@ -643,8 +643,10 @@ async def _turn_build_prompt(turn: _ChatTurn) -> None:
                     build_cancelled_turn_preamble,  # circular: context -> dashboard.chat -> chat_runner (can't top-level: context imports chat at module load); circular: context -> chat -> chat_runner; circular: context -> chat
                 )
 
-                preamble = build_cancelled_turn_preamble(
-                    state.context_builder.conversation_log, session_key
+                preamble = await asyncio.to_thread(
+                    build_cancelled_turn_preamble,
+                    state.context_builder.conversation_log,
+                    session_key,
                 )
                 if preamble:
                     message = preamble + "\n\n" + message
@@ -1017,7 +1019,7 @@ async def _turn_settle_debts(turn: _ChatTurn) -> None:
     # re-queue. Put the flag back here rather than at the success check in
     # _turn_context_usage, because most of those paths never reach it;
     # without this the index is lost for the remaining life of the session.
-    # Wrapped for the same reason as the flush in _turn_release_handles (chat_turn/turn_entry.py).
+    # Wrapped for the same reason as the flush in _turn_flush_file_changes (chat_turn/turn_entry.py).
     #
     # The member condition rides the same re-arm for the same reason: a
     # member DM's FIRST turn that dies before landing (MemberRulesUnreadable

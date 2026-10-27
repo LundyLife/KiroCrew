@@ -560,8 +560,10 @@ class DashboardState:
         self._warm_task_brief_not_before: dict[str, float] = {}
         self._warm_task_brief_tasks: dict[str, asyncio.Task[Any]] = {}
         self._warm_task_brief_model_active: set[str] = set()
-        # Threads whose in-flight model call was left behind by a departure.
+        # Threads whose in-flight model call was dropped by a real cancel.
         self._warm_task_brief_abandoned: set[str] = set()
+        # Threads whose brief has posted its opener: leaving keeps the brief.
+        self._warm_task_brief_opened: set[str] = set()
         self._slack_to_slot: dict[str, str] = {}  # Slack session_key → slot name
         # Live OPTIONS controls, keyed by the SESSION KEY that owns them.
         #
@@ -1195,6 +1197,10 @@ class DashboardState:
     broadcast_ws_owners = _slots_push.broadcast_ws_owners
     ws_client_count = _slots_push.ws_client_count
     dashboard_user_ws_count = _slots_push.dashboard_user_ws_count
+    set_fold_delta_capable = _slots_push.set_fold_delta_capable
+    set_fold_watch = _slots_push.set_fold_watch
+    fold_watch_routing = _slots_push.fold_watch_routing
+    add_fold_watch_listener = _slots_push.add_fold_watch_listener
     broadcast_browser_event = _slots_push.broadcast_browser_event
     register_ws = _slots_push.register_ws
     send_members_subscribed = _slots_push.send_members_subscribed

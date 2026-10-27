@@ -150,7 +150,7 @@ receive a vault secret is undecided
 | `env` | object | String environment variables passed to the job |
 | `persistent_session` | boolean | Default `true`; retain one agent session across runs |
 | `silent` | boolean | Default `false`; suppress automatic result delivery |
-| `folder` | string | Existing Schedule-folder name; an unknown name leaves the job ungrouped until a later enable finds it |
+| `folder` | string | Schedule-folder name. Installing, enabling or updating the app in a running gateway creates a missing folder; a name several folders share, registration during gateway startup, or a CLI enable leaves the job ungrouped |
 | `timezone` | string | IANA zone name the schedule and `skip_dates` are evaluated in, e.g. `America/New_York`. Optional, but an empty value falls back to the gateway config's timezone and then to **UTC** — so `"cron_expr": "0 6 * * *"` without it fires at 06:00 UTC, the wrong calendar day for most users. An unknown zone is rejected at manifest validation. A per-**user** zone is not manifest data: pass `timezone=` to `ctx.cron.add_job` instead |
 | `skip_dates` | string[] | Calendar dates the job must not fire on, evaluated in `timezone`. Must be zero-padded `YYYY-MM-DD` — `2026-1-1` parses but never matches the padded fire-time rendering, so it is rejected at manifest validation rather than silently skipping nothing |
 | `timeout` | number | Seconds a `command` or `script` subprocess may run. `0` or omitted uses the scheduler default: 30s for a script, 300s for a command |
@@ -1036,10 +1036,11 @@ installs do not run `onInstall`; build first, then install. The `onEnable`,
 **not run on native Windows** (which has no `/bin/bash`): the runner refuses the
 hook before any process is started and reports a failure whose message names the
 unsupported platform, rather than letting the spawn fail opaquely and look like
-your script breaking. `onInstall` also runs through `/bin/bash`, without that
-up-front refusal, so a registry install of an app that declares it fails on a
-native-Windows host. Write hooks for POSIX shells; do not rely on them running
-on a native-Windows host.
+your script breaking. `onInstall` also runs through `/bin/bash` and gets the
+same up-front refusal: a registry install or update of an app that declares it
+fails on a native-Windows host with an error naming the unsupported platform,
+before the script is started. Write hooks for POSIX shells; do not rely on them
+running on a native-Windows host.
 
 **Exception — `platform.installMode: "client"` apps.** For a client app the
 script is **advisory**: a failure is reported on the response as

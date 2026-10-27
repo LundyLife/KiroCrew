@@ -39,9 +39,10 @@ import { useDrawerSwipe, animateDrawer, registerDrawerTargets, takeOverDrawer, s
 import { useTopbarCollapse } from '../lib/useTopbarCollapse'
 import { subscribeNativeNavigate, useMacFullscreen } from './platform/electronBridge'
 import { useNativeHistoryStep } from './platform/nativeHistoryStep'
+import { labelCurrentRouteEntry } from '../lib/routeHistoryLabels'
 import AppIcon from '../components/AppIcon'
 import { useUpdateFlow } from './updates/updateFlow'
-import { useUpdateSubscription } from '../hooks/useUpdateSubscription'
+import { useUpdateSubscription, usePolicyGovernedNotification } from '../hooks/useUpdateSubscription'
 import { useBottomTerminalOpen, useTerminalPosition } from '../hooks/useBottomTerminal'
 import { useTerminalRestoreProbe } from './boot/terminalRestore'
 import { useTerminalPoppedOut } from '../utils/terminalPopout'
@@ -321,6 +322,9 @@ export function useAppShell() {
   // Capture Electron update lifecycle events app-wide so UpdateModal fires on
   // any page, not just after the user has opened Settings > About.
   useUpdateSubscription()
+  // Notify the main process whenever the gateway status reports a security
+  // policy provider governs this install's updates, so the feed lane stands down.
+  usePolicyGovernedNotification()
   const { branding, botName, avatar } = useShellBranding({ colorTheme, brandName, brandLogo, brandFavicon })
   useRumPageView()
   useNotificationSound()
@@ -841,6 +845,14 @@ export function useAppShell() {
     const base = titleLabel ? i18nT('app.tab_title', { label: titleLabel, productName: botName }) : botName
     document.title = totalAttention > 0 ? `(${totalAttention}) ${base}` : base
   }, [totalAttention, botName, titleLabel])
+  // Name the history entry on screen for the Back/Forward arrows' history
+  // menu (#17453): the session on chat, the page anywhere else, and nothing on
+  // a route with no rail row, so that entry is left out of the list. Re-run on
+  // every entry, because the name belongs to the entry, not to the route.
+  const historyLabel = isChat ? (activeSessionTitle || chatPanelLabel) : titleLabel
+  useEffect(() => {
+    labelCurrentRouteEntry(historyLabel)
+  }, [historyLabel, location.key])
   // Phone chat page: the header is ONE bar for both the shell and the
   // conversation. The chat page fills `#mobile-topbar-slot` (sessions toggle,
   // session title + menu) and `#mobile-topbar-trail-slot` (its overflow menu)

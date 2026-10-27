@@ -203,9 +203,10 @@ Copy takes the plain-text `content`; chat search reads the card's own visible
 text, so its count matches what can be highlighted. Only an assistant row draws it: any other
 role carrying the same `meta.kind` (the send route keeps client `meta` keys on
 the user row) draws as its own role. These generated rows
-are excluded from the task fingerprint. A new user turn, the owner leaving,
-slot replacement, reset, close, and a finished task drop a stale result
-unposted. Patrol turns, `[work-ledger wake]` rows, and worker reports change
+are excluded from the task fingerprint. A new user turn, slot replacement,
+reset, close, and a finished task drop a stale result unposted. The owner
+leaving drops the brief only before its opener is posted; after the opener,
+the result still posts as ordinary history while the owner is away. Patrol turns, `[work-ledger wake]` rows, and worker reports change
 the dedup fingerprint but do not make a prepared result stale; a turn running
 at publication defers the result until it ends. Only a live user row the person
 typed cancels a brief in preparation; assistant rows, automation rows and turn
@@ -4843,6 +4844,20 @@ a trust root on its own; publication therefore also writes a
   each pass is capped at `_LEGACY_PID_BINDING_PRUNE_BUDGET` (2000) so a
   six-figure backlog drains over passes instead of monopolising one maintenance
   task.
+- **Transcript staging temps** (`SessionCleanup._sweep_session_staging_temps` →
+  `session_staging_sweep.sweep_session_staging_temps`): transcript writers stage
+  new content beside its target and rename it into place, and two staging names
+  land directly in `<data home>/sessions/`: `tmp<8>.tmp` (a `mkstemp` with no
+  prefix: the metadata-line edit in `history_projection` and the by-name
+  `atomic_write` path) and `.kc-incoming-<8>` (the session-store moves). A writer
+  killed between the stage and the rename runs no handler, so the temp, often a
+  full transcript copy, stays. The same periodic tick removes it, on the
+  maintenance executor, when all three hold: the name is exactly one of those two
+  `mkstemp` shapes, it is a regular file by `lstat` through a pinned directory (a
+  link is never followed), and it is unmodified for
+  `STAGING_TEMP_MIN_AGE_SECS` (1 h), far beyond any stage-to-rename window, so a
+  write in flight in any process is never touched. Only direct children of the
+  sessions directory are examined; `*.jsonl.lock` sentinels are left alone.
 - **Shell audit log cap** (`SessionCleanup._sweep_shell_audit_log` →
   `shell_audit_log.rotate_shell_audit_log`): the bundled `postToolUse` hook in
   `config/defaults.json` records every `execute_bash` call as ONE
