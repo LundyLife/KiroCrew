@@ -1067,9 +1067,14 @@ async def _find_login(
     only): take the first frame that shows a field, whatever its origin.
     """
     top_id, _loader, now = await top.top_frame()
-    if not top_id or now != top_origin:
+    if not top_id or not now:
+        return None  # mid-navigation: nothing committed to read yet
+    if now != top_origin:
         raise AskError(ORIGIN_CHANGED)
-    top_ctx = await top.world(top_id)
+    try:
+        top_ctx = await top.world(top_id)
+    except AskError:
+        return None  # the document is being replaced; look again next turn
     for fprobe, frame_id in await _login_frames(top, top_id, frames):
         try:
             if frame_id == top_id:
@@ -1156,7 +1161,12 @@ async def sign_in(probe: PageProbe, ask: QuickAsk, values: dict[str, str], frame
     while True:
         if ask.outcome:
             raise AskError(CANCELLED)  # the turn ended under the walk
-        login = await _find_login(probe, ask.top_origin, ask.origin, frames)
+        try:
+            login = await _find_login(probe, ask.top_origin, ask.origin, frames)
+        except AskError as exc:
+            if exc.code == ORIGIN_CHANGED:
+                raise
+            login = None  # a read that failed mid-navigation: look again
         if login is not None and login.password:
             if login.user and not user_done:
                 await _write(login, login.user, user)  # type: ignore[arg-type]
