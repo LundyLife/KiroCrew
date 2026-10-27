@@ -909,6 +909,28 @@ describe('Kiro Cloud Sessions profiles', () => {
     } }])
   })
 
+  it('lets a separator typed in the repositories field be deleted again', async () => {
+    stored = { session_environments: { coder_url: '', profiles: [], kiro_cloud_profiles: [], default_profile: '' } }
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Kiro Cloud profile' }))
+    const repos = () => within(screen.getByRole('group', { name: 'kiro-cloud-1' })).getByLabelText('Repositories')
+    // Typed one key at a time, then the comma is backspaced away: the field
+    // shows what was typed, not the list rebuilt from it with ", " put back.
+    for (const value of ['acme/web', 'acme/web,', 'acme/web']) {
+      fireEvent.change(repos(), { target: { value } })
+      expect(repos()).toHaveValue(value)
+    }
+    // An emptied middle entry can lose its separator too.
+    fireEvent.change(repos(), { target: { value: 'acme/web, , acme/api' } })
+    fireEvent.change(repos(), { target: { value: 'acme/web, acme/api' } })
+    expect(repos()).toHaveValue('acme/web, acme/api')
+    fireEvent.click(save())
+    expect(await screen.findByText(SAVED)).toBeVisible()
+    expect(writes.at(-1)?.value).toMatchObject({
+      kiro_cloud_profiles: [{ id: 'kiro-cloud-1', name: '', repositories: ['acme/web', 'acme/api'] }],
+    })
+  })
+
   it('carries the default along when a cloud profile id is renamed', async () => {
     stored = {
       session_environments: {

@@ -403,6 +403,10 @@ export function SessionEnvironmentsCard() {
   })
   const removeRow = (index: number) => setOpenRows(rows => rows.filter((_, i) => i !== index))
   const [openCloudRows, setOpenCloudRows] = useState<boolean[]>([])
+  // What the person typed in each Kiro Cloud row's repositories field. The field
+  // shows this, not the array rebuilt from it, so a separator they delete stays
+  // deleted; the array is still what saves (cleaned by withCleanRepositories).
+  const [repoText, setRepoText] = useState<(string | undefined)[]>([])
   const mutation = useMutation({
     mutationFn: (value: EnvironmentSettings) => api.patchConfig('session_environments', value) as Promise<ConfigResponse>,
     onMutate: () => qc.cancelQueries({ queryKey: ['kirocrewConfig'] }),
@@ -412,6 +416,7 @@ export function SessionEnvironmentsCard() {
       // new file drafts the old folder. Open drafts keep the folder they began in.
       void qc.invalidateQueries({ queryKey: ['slot-environment'] })
       setDraft(null)
+      setRepoText([])
       setSaved(true)
       setRemoved(false)
     },
@@ -720,13 +725,18 @@ export function SessionEnvironmentsCard() {
                     open={!!openCloudRows[index]} onToggle={() => setOpenCloudRows(rows => { const next = [...rows]; next[index] = !next[index]; return next })}>
                     {cloudFields.map(field => (
                       <SettingsInput key={field.key} label={field.label} description={field.description}
-                        value={field.key === 'repositories' ? profile.repositories.join(', ') : profile[field.key]}
-                        onChange={value => updateCloud(index, field.key === 'repositories'
-                          ? { repositories: value.split(',').map(r => r.trim()) }
-                          : { [field.key]: value })} />
+                        value={field.key === 'repositories'
+                          ? repoText[index] ?? profile.repositories.join(', ')
+                          : profile[field.key]}
+                        onChange={value => {
+                          if (field.key !== 'repositories') return updateCloud(index, { [field.key]: value })
+                          setRepoText(texts => { const next = [...texts]; next[index] = value; return next })
+                          updateCloud(index, { repositories: value.split(',').map(r => r.trim()) })
+                        }} />
                     ))}
                     <Btn type="button" onClick={() => {
                       setOpenCloudRows(rows => rows.filter((_, i) => i !== index))
+                      setRepoText(texts => texts.filter((_, i) => i !== index))
                       setRemoved(true)
                       change(withoutDefault({ ...config, kiro_cloud_profiles: cloudProfiles.filter((_, i) => i !== index) }, profile.id, 'cloud'))
                     }}>
@@ -753,6 +763,7 @@ export function SessionEnvironmentsCard() {
           setRemoved(false)
           setOpenRows([])
           setOpenCloudRows([])
+          setRepoText([])
           mutation.reset()
         }}>{t('sessionEnvironments.discard')}</Btn>
         {(saved || (removed && draft)) && <span role="status" className="text-[13px] text-muted">
