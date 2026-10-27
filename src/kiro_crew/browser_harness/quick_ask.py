@@ -379,7 +379,9 @@ _INSPECT_JS = """function () {
     || ((cs.maskImage || cs.webkitMaskImage || 'none') !== 'none');
   var visible = r.width >= 2 && r.height >= 2 && cs.display !== 'none'
     && cs.visibility !== 'hidden' && op > 0.05;
-  for (var p = el.parentElement; visible && p; p = p.parentElement) {
+  // Up the COMPOSED tree: a shadow host's opacity hides what is inside its root.
+  var up = function (n) { return n.parentElement || (n.getRootNode && n.getRootNode().host) || null; };
+  for (var p = up(el); visible && p; p = up(p)) {
     var ps = getComputedStyle(p);
     op *= parseFloat(ps.opacity || '1') * fop(ps);
     if (ps.mixBlendMode && ps.mixBlendMode !== 'normal') blend = true;
@@ -445,7 +447,10 @@ _INSPECT_JS = """function () {
 #: Insert *v* into the bound element, only if it holds focus (through open shadow
 #: roots). The check and the insert run in one synchronous call on the element,
 #: so no page script runs between them and the text cannot land anywhere else.
-_INSERT_JS = """function (v) {
+_INSERT_JS = """function (v, origin) {
+  // The document's own origin, read in the same call: a navigation that commits
+  // another site between the checks and this write cannot receive the value.
+  if (origin && location.origin !== origin) return false;
   var root = this.getRootNode ? this.getRootNode() : document;
   if (root.activeElement !== this) return false;
   return document.execCommand('insertText', false, v) === true;
@@ -1119,7 +1124,7 @@ async def _write(login: _Login, node: int, value: str) -> None:
     """:func:`fill`'s write, into one node the walk just checked."""
     await login.probe._send("DOM.focus", {"backendNodeId": node})
     await login.probe.call(node, login.ctx, _PREPARE_JS)
-    if await login.probe.call(node, login.ctx, _INSERT_JS, value) is not True:
+    if await login.probe.call(node, login.ctx, _INSERT_JS, value, login.origin) is not True:
         raise AskError(ORIGIN_CHANGED)
 
 
@@ -1262,7 +1267,7 @@ async def fill(probe: PageProbe, ask: QuickAsk, values: dict[str, str]) -> None:
             continue
         await fprobe._send("DOM.focus", {"backendNodeId": b.node})
         await fprobe.call(b.node, ctx, _PREPARE_JS)
-        if await fprobe.call(b.node, ctx, _INSERT_JS, value) is not True:
+        if await fprobe.call(b.node, ctx, _INSERT_JS, value, ask.origin) is not True:
             raise AskError(ORIGIN_CHANGED)
 
 

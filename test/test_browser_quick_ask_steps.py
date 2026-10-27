@@ -58,6 +58,8 @@ class LoginPage(FakePage):
         self.on_enter: Callable[[int | None], None] | None = None
         self.on_click: Callable[[], None] | None = None
         self.enters = 0
+        #: One stale top-frame read (the old document), then the truth again.
+        self.stale_tree: dict[str, Any] | None = None
 
     def show(self, frame: str = "F1", **roles: int) -> None:
         self.login[frame] = roles
@@ -66,6 +68,14 @@ class LoginPage(FakePage):
         self, method: str, params: dict[str, Any] | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         p = dict(params or {})
+        if (
+            method == "Page.getFrameTree"
+            and self.stale_tree
+            and not session_id_is_child(self, session_id)
+        ):
+            # The race: the tree still names the old document after another committed.
+            tree, self.stale_tree = self.stale_tree, None
+            return {"frameTree": {"frame": tree, "childFrames": []}}
         if method == "Runtime.evaluate" and str(p.get("expression", "")).startswith(qa._FIND_JS):
             self.calls.append((method, {**p, "_sid": session_id}))
             role = re.search(r"\('(\w+)'\)$", p["expression"]).group(1)  # type: ignore[union-attr]
@@ -87,6 +97,10 @@ class LoginPage(FakePage):
         if method == "Input.dispatchMouseEvent" and p["type"] == "mouseReleased" and self.on_click:
             self.on_click()
         return out
+
+
+def session_id_is_child(page: LoginPage, sid: str | None) -> bool:
+    return bool(sid) and any(f["session"] == sid for f in page.frames.values())
 
 
 def _two_step(page: LoginPage, frame: str = "F1") -> tuple[int, int]:
@@ -166,6 +180,24 @@ async def test_the_walk_stops_and_drops_the_password_when_the_tab_leaves_the_sit
     assert (status, out["error"]) == (409, "origin_changed")
     assert page.inserts == [(user, EMAIL)]
     assert ask.outcome == "origin_changed"
+
+
+async def test_a_site_change_racing_the_origin_read_still_gets_nothing() -> None:
+    page = LoginPage()
+    user, password = _two_step(page)
+
+    def race(focused: int | None) -> None:
+        page.stale_tree = dict(page.frame)  # the next read still says accounts.example.com
+        page.frame.update(url="https://evil.test/password", loaderId="L9")
+        page.nodes[user]["connected"] = False
+        page.show("F1", password=password)
+
+    page.on_enter = race
+    _hub, _rec, ask = await _ask(page)
+    status, out, _ = await _answer(_fill(ask, username=EMAIL, password=CANARY))
+    # The insert reads the document's own origin in the same call, and refuses.
+    assert (status, out["error"]) == (409, "origin_changed")
+    assert page.inserts == [(user, EMAIL)]
 
 
 async def test_a_same_site_reload_between_screens_is_still_the_bound_site() -> None:

@@ -227,8 +227,12 @@ class FakePage:
             elif fn == qa._HIT_JS:
                 value = bool(self.nodes[node].get("hit"))
             elif fn == qa._INSERT_JS:
-                # One call: lands only if THIS node holds focus right now.
-                value = self.focused == node
+                # One call: lands only if THIS node holds focus right now, in a
+                # document of the origin the caller names.
+                fid = self.nodes[node]["frame"]
+                url = self.frame["url"] if fid == self.frame["id"] else self.frames[fid]["url"]
+                want = params["arguments"][1]["value"] if len(params["arguments"]) > 1 else ""
+                value = self.focused == node and (not want or qa.origin_of(url) == want)
                 if value:
                     self.inserts.append((node, params["arguments"][0]["value"]))
             elif fn == qa._PREPARE_JS:
