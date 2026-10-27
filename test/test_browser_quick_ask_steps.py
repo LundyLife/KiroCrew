@@ -58,6 +58,7 @@ class LoginPage(FakePage):
         self.on_enter: Callable[[int | None], None] | None = None
         self.on_click: Callable[[], None] | None = None
         self.enters = 0
+        self.on_find: Callable[[str], None] | None = None
         #: One stale top-frame read (the old document), then the truth again.
         self.stale_tree: dict[str, Any] | None = None
 
@@ -80,6 +81,8 @@ class LoginPage(FakePage):
             self.calls.append((method, {**p, "_sid": session_id}))
             role = re.search(r"\('(\w+)'\)$", p["expression"]).group(1)  # type: ignore[union-attr]
             node = self.login.get(self._ctx[p["contextId"]], {}).get(role)
+            if node and self.on_find:
+                self.on_find(role)
             if node and self.nodes[node].get("connected", True):
                 return {"result": {"objectId": f"m:{node}"}}
             return {"result": {"type": "object", "subtype": "null"}}
@@ -252,6 +255,22 @@ async def test_the_walk_stops_typing_when_the_ask_runs_out_mid_walk() -> None:
     status, _out, _ = await _answer(_fill(ask, username=EMAIL, password=CANARY))
     assert status == 409 and ask.outcome == "timed_out"
     assert page.inserts == [(user, EMAIL)]
+
+
+async def test_an_ask_that_runs_out_while_the_password_box_is_found_types_nothing() -> None:
+    page = LoginPage()
+    password = page.add("p1", type="password", rect=[20, 30, 300, 30])
+    page.show("F1", password=password)
+    _hub, _rec, ask = await _ask(page)
+
+    def expire(role: str) -> None:
+        if role == "password":
+            ask.deadline = 0.0  # runs out inside discovery, after the loop's own check
+
+    page.on_find = expire
+    status, _out, _ = await _answer(_fill(ask, password=CANARY))
+    assert status == 409 and ask.outcome == "timed_out"
+    assert page.inserts == []
 
 
 async def test_no_field_in_time_keeps_the_ask_open_for_a_takeover() -> None:

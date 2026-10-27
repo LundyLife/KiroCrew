@@ -1120,8 +1120,15 @@ async def _find_login(
     return None
 
 
-async def _write(login: _Login, node: int, value: str) -> None:
-    """:func:`fill`'s write, into one node the walk just checked."""
+def _spent(ask: QuickAsk) -> bool:
+    """The ask ended or ran out: the walk types nothing more."""
+    return bool(ask.outcome) or asyncio.get_running_loop().time() >= ask.deadline
+
+
+async def _write(ask: QuickAsk, login: _Login, node: int, value: str) -> None:
+    """:func:`fill`'s write, into one node the walk just checked, while the ask is live."""
+    if _spent(ask):
+        raise AskError(CANCELLED)
     await login.probe._send("DOM.focus", {"backendNodeId": node})
     await login.probe.call(node, login.ctx, _PREPARE_JS)
     if await login.probe.call(node, login.ctx, _INSERT_JS, value, login.origin) is not True:
@@ -1166,7 +1173,7 @@ async def sign_in(
     deadline = loop.time() + STEP_WAIT_S
     nudge_at = 0.0
     while True:
-        if ask.outcome or loop.time() >= ask.deadline:
+        if _spent(ask):
             raise AskError(CANCELLED)  # the turn ended under the walk, or the ask ran out
         try:
             login = await _find_login(probe, ask.top_origin, ask.origin, frames)
@@ -1176,14 +1183,14 @@ async def sign_in(
             login = None  # a read that failed mid-navigation: look again
         if login is not None and login.password:
             if login.user and not user_done:
-                await _write(login, login.user, user)  # type: ignore[arg-type]
-            await _write(login, login.password, password)
+                await _write(ask, login, login.user, user)  # type: ignore[arg-type]
+            await _write(ask, login, login.password, password)
             await _press_enter(probe, login, login.password)
             return
         now = loop.time()
         if login is not None and login.user:
             if not user_done:
-                await _write(login, login.user, user)  # type: ignore[arg-type]
+                await _write(ask, login, login.user, user)  # type: ignore[arg-type]
                 await _press_enter(probe, login, login.user)
                 user_done = True
                 deadline, nudge_at = now + STEP_WAIT_S, now + STEP_NUDGE_S
