@@ -321,6 +321,10 @@ async def _act(
             return _fail(409, qa.NO_FIELD)
         if ask.outcome:
             return _fail(409, "stale")
+        if exc.code == qa.CANCELLED:
+            # The sign-in walk ran past the ask's deadline: nothing more is typed.
+            await _finish(hub, key, ask, action, qa.TIMED_OUT)
+            return _fail(409, "stale")
         # Nothing about why rides on the answer: the page moved, or would not take it.
         await _finish(hub, key, ask, action, qa.ORIGIN_CHANGED)
         return _fail(409, qa.ORIGIN_CHANGED)

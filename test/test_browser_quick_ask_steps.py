@@ -238,6 +238,22 @@ async def test_next_is_clicked_once_when_enter_does_not_move_the_screen_on(
     assert page.inserts == [(user, EMAIL), (password, CANARY)]
 
 
+async def test_the_walk_stops_typing_when_the_ask_runs_out_mid_walk() -> None:
+    page = LoginPage()
+    user, password = _two_step(page)
+    _hub, _rec, ask = await _ask(page)
+
+    def expire(focused: int | None) -> None:
+        ask.deadline = 0.0  # the ask's time is up while the password screen loads
+        page.nodes[user]["connected"] = False
+        page.show("F1", password=password)
+
+    page.on_enter = expire
+    status, _out, _ = await _answer(_fill(ask, username=EMAIL, password=CANARY))
+    assert status == 409 and ask.outcome == "timed_out"
+    assert page.inserts == [(user, EMAIL)]
+
+
 async def test_no_field_in_time_keeps_the_ask_open_for_a_takeover() -> None:
     page = LoginPage()
     user, _password = _two_step(page)

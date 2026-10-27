@@ -340,7 +340,8 @@ function SignInBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; send: S
   const userRef = useRef<HTMLInputElement>(null)
   const passRef = useRef<HTMLInputElement>(null)
   useEmptyOnUnmount(userRef, passRef)
-  const https = ask.origin.toLowerCase().startsWith('https:')
+  // Locked only when the page around the frame is https too: an http page can swap the frame.
+  const https = [ask.origin, ask.top_origin ?? ask.origin].every(o => o.toLowerCase().startsWith('https:'))
   const SiteIcon = https ? Lock : Unlock
   const site = ask.top_origin ? i18nT('pages.chat.quickAsk.origin_inside', { origin: ask.origin, top: ask.top_origin }) : ask.origin
   const userLabel = mode === 'required' ? i18nT('pages.chat.quickAsk.label_email_or_phone') : i18nT('pages.chat.quickAsk.label_email_or_phone_optional')
@@ -353,7 +354,7 @@ function SignInBody({ ask, busy, send }: { ask: QuickAsk; busy: boolean; send: S
     void send('fill', { ...(username ? { username } : {}), password })
   }
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2" noValidate data-testid="quick-ask-sign-in">
+    <form onSubmit={submit} className="flex flex-col gap-2" noValidate aria-busy={busy} data-testid="quick-ask-sign-in">
       <Field label={i18nT('pages.chat.quickAsk.label_website')}>
         {id => (
           <div className="relative min-w-0" data-testid="quick-ask-origin">

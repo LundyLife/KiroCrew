@@ -1166,8 +1166,8 @@ async def sign_in(
     deadline = loop.time() + STEP_WAIT_S
     nudge_at = 0.0
     while True:
-        if ask.outcome:
-            raise AskError(CANCELLED)  # the turn ended under the walk
+        if ask.outcome or loop.time() >= ask.deadline:
+            raise AskError(CANCELLED)  # the turn ended under the walk, or the ask ran out
         try:
             login = await _find_login(probe, ask.top_origin, ask.origin, frames)
         except AskError as exc:
