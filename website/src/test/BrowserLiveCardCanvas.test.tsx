@@ -293,7 +293,7 @@ describe('takeover input', () => {
     await settle()
     expect(document.activeElement).not.toBe(screen.getByTestId('browser-live-type-proxy'))
     // 50 CSS px up in a 320x200 box drawing a 640x400 frame: 100 frame px down, at the start point.
-    expect(writes.input.mock.calls.map(c => c[1])).toEqual([{ type: 'wheel', x: 320, y: 300, dx: 0, dy: 100, modifiers: 0 }])
+    expect(writes.input.mock.calls.map(c => c[1])).toEqual([{ type: 'wheel', x: 320, y: 300, dx: 0, dy: 100, modifiers: 0, w: 640 }])
   })
 
   it('a finger that wanders less than the slop is still a tap', async () => {

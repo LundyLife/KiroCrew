@@ -180,7 +180,7 @@ describe('touch gestures', () => {
   it('a swipe is a wheel at the start point: finger up scrolls the page down, scaled to frame pixels', () => {
     // 640x400 CSS box drawing a 1280x800 frame: 2 frame px per CSS px.
     expect(swipeToWheel({ x: 100, y: 200 }, { x: 90, y: 150 }, { x: 100, y: 220 }, box, frame))
-      .toEqual({ type: 'wheel', x: 200, y: 440, dx: 20, dy: 100, modifiers: 0 })
+      .toEqual({ type: 'wheel', x: 200, y: 440, dx: 20, dy: 100, modifiers: 0, w: 1280 })
     expect(swipeToWheel({ x: 100, y: 100 }, { x: 100, y: 130 }, { x: 100, y: 100 }, box, frame)?.dy).toBe(-60)
   })
   it('no movement, or no box, sends nothing', () => {

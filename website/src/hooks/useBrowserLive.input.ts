@@ -218,7 +218,7 @@ export function swipeToWheel(prev: Pt, now: Pt, anchor: Pt, box: Box, frame: Fra
   if (!dx && !dy) return null
   const p = mapPointToFrame(anchor.x, anchor.y, box, frame, true)
   if (!p) return null
-  return { type: 'wheel', x: p.x, y: p.y, dx, dy, modifiers: 0 }
+  return { type: 'wheel', x: p.x, y: p.y, dx, dy, modifiers: 0, w: frame.w }
 }
 
 // ---- touch typing ------------------------------------------------------------
