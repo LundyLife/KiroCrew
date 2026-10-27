@@ -13,7 +13,7 @@ import { api } from '../../../api/client'
 import { useFilteredDropdown } from '../../../hooks/useFilteredDropdown'
 import { useModelPickerHiddenModelsQuery, useModelPickerConfigured, shouldSeparateModelEffort, filterInteractiveModels, effortToCarry, switchGroupedModel } from '../../../hooks/useInteractiveModels'
 import { jevRouteOffered, withJevRoute, JEV_ROUTE_MODEL } from '../../../lib/jevRoute'
-import { agentSwitchFailureMessage, modelSwitchDeferredMessage } from '../../../utils/agentSwitchFeedback'
+import { agentSwitchFailureMessage, agentSwitchFailureNotice, modelSwitchDeferredMessage } from '../../../utils/agentSwitchFeedback'
 import { focusComposer } from '../composerFocus'
 import { i18nT } from '../../../i18n/t'
 import { fetchDashboardConfig } from '../../../api/dashboardConfigQuery'
@@ -219,7 +219,7 @@ export function useSessionChoices({
       // Closing the picker is the call sites' job and already happens
       // synchronously alongside this call, so a failure surfaces as the shared
       // notice rather than by holding the dropdown open.
-      dispatch(setAgentSwitchNotice(agentSwitchFailureMessage(error)))
+      dispatch(setAgentSwitchNotice(agentSwitchFailureNotice(error, agentName)))
     }
     // The setPending* setters are useState setters, so they are stable and cost
     // nothing to list. `installedAgents`, `provider` and `queryClient` are

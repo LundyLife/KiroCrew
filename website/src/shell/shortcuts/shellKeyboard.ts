@@ -8,7 +8,7 @@ import { createChatForView, showCreatedChat } from '../../lib/createdChatView'
 import { pendingSlotSwitch, pendingSlotSwitchTarget, performSlotSwitch } from '../../lib/slotSwitch'
 import { performAgentSlotSwitch } from '../../lib/agentSwitch'
 import { focusComposerElement, queryComposerOrExpand } from '../../pages/chat/composerFocus'
-import { agentSwitchFailureMessage, modelSwitchDeferredMessage } from '../../utils/agentSwitchFeedback'
+import { agentSwitchFailureMessage, agentSwitchFailureNotice, modelSwitchDeferredMessage } from '../../utils/agentSwitchFeedback'
 import { api } from '../../api/client'
 import { newTerminalByChord, toggleTerminalByChord } from '../../lib/terminalChordFocus'
 import { focusPopout as focusTerminalPopout } from '../../utils/terminalPopout'
@@ -77,7 +77,9 @@ export function useShellKeyboard({ toggleFocusMode, toggleNav, terminalEnabled, 
   const agentSwitchNotice = useAppSelector(s => s.chat.agentSwitchNotice)
   useEffect(() => {
     if (!agentSwitchNotice) return
-    const timer = window.setTimeout(() => dispatch(setAgentSwitchNotice(null)), 6000)
+    // A notice that offers a new chat stays up longer: it asks for a click, not just a read.
+    const ms = agentSwitchNotice.newChatAgent ? 15000 : 6000
+    const timer = window.setTimeout(() => dispatch(setAgentSwitchNotice(null)), ms)
     return () => window.clearTimeout(timer)
   }, [agentSwitchNotice, dispatch])
   // A new chat that could not get its own session folder opened on the default
@@ -98,7 +100,7 @@ export function useShellKeyboard({ toggleFocusMode, toggleNav, terminalEnabled, 
       // to the rebroadcast).
       await performAgentSlotSwitch(slot, agent, store.dispatch)
     } catch (error) {
-      dispatch(setAgentSwitchNotice(agentSwitchFailureMessage(error)))
+      dispatch(setAgentSwitchNotice(agentSwitchFailureNotice(error, agent)))
     }
   }, [dispatch])
   useKeyboardShortcuts({ onToggleShortcutsModal: toggleShortcutsModal, onNewChat: () => newChatMutation.mutate(), disabled: shortcutsOpen,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ApiError } from '../api/client'
-import { agentSwitchFailureMessage, isTurnInFlightError } from '../utils/agentSwitchFeedback'
+import { agentSwitchFailureMessage, agentSwitchFailureNotice, isMemberNeedsNewChatError, isTurnInFlightError } from '../utils/agentSwitchFeedback'
 import chatReducer, { setAgentSwitchNotice } from '../store/chatSlice'
 
 /** The gateway's real refusal shape for a mid-turn switch (chat_handlers.py). */
@@ -98,5 +98,34 @@ describe('agent switch failure feedback', () => {
     const repeated = chatReducer(failed, setAgentSwitchNotice('invalid agent name'))
     expect(repeated.agentSwitchNotice).not.toBe(failed.agentSwitchNotice)
     expect(chatReducer(failed, setAgentSwitchNotice(null)).agentSwitchNotice).toBeNull()
+  })
+
+  it('names the crewmate and offers a new chat when a chat with history refuses it', () => {
+    // The gateway's real refusal (agent_switch.py) for a crewmate with its own
+    // memory picked in a conversation that already has messages.
+    const error = new ApiError(
+      409,
+      'Open a new conversation to choose member memory.',
+      JSON.stringify({ error: 'Open a new conversation to choose member memory.', code: 'member_memory_requires_new_conversation' }),
+    )
+    expect(isMemberNeedsNewChatError(error)).toBe(true)
+    expect(agentSwitchFailureNotice(error, 'kirocrew-contributor')).toEqual({
+      message: 'kirocrew-contributor has its own memory, so it can only start a new chat. This chat keeps its current agent.',
+      newChatAgent: 'kirocrew-contributor',
+    })
+  })
+
+  it('offers no new chat for any other refusal', () => {
+    const pinned = new ApiError(409, 'pinned', JSON.stringify({ error: 'pinned', code: 'member_session_pinned' }))
+    expect(agentSwitchFailureNotice(pinned, 'writer')).toEqual({ message: 'pinned' })
+    expect(agentSwitchFailureNotice(turnInFlight409(), 'writer').newChatAgent).toBeUndefined()
+    const non409 = new ApiError(400, 'bad', JSON.stringify({ error: 'bad', code: 'member_memory_requires_new_conversation' }))
+    expect(isMemberNeedsNewChatError(non409)).toBe(false)
+  })
+
+  it('stores a notice that carries a new-chat offer', () => {
+    const initial = chatReducer(undefined, { type: 'test/init' })
+    const next = chatReducer(initial, setAgentSwitchNotice({ message: 'm', newChatAgent: 'writer' }))
+    expect(next.agentSwitchNotice).toEqual({ message: 'm', newChatAgent: 'writer' })
   })
 })
