@@ -570,3 +570,28 @@ class TestSamplerWiring:
             SimpleNamespace(push=lambda _note: None), probe_fn=lambda: "status"
         )
         assert notifier._run_probe() == "status"
+
+
+class TestDefaultTestFloor:
+    def test_a_test_that_does_not_re_arm_the_reclaim_never_reclaims(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The per-test floor disarms the reclaim, so a sampler test cannot depend on
+        whether this host's live slice happens to sit near its memory.high."""
+        assert sb._SLICE_RECLAIM_DISARMED is True
+        base = tmp_path / "user-manager"
+        base.mkdir()
+        monkeypatch.setattr(sb, "_USER_MANAGER_CGROUP_BASE", str(base))
+        monkeypatch.setattr(sb, "_SLICE_RECLAIM_LAST_AT", None)
+        monkeypatch.delenv("KIROCREW_POD", raising=False)
+        meminfo = tmp_path / "meminfo"
+        meminfo.write_text("MemTotal: 100 kB\nSwapTotal:       0 kB\n", encoding="utf-8")
+        monkeypatch.setattr(sb, "_PROC_MEMINFO", str(meminfo))
+        _set_config(monkeypatch, None)
+        slice_ = _Slice(base)
+        _cache_dominated(slice_)
+        kernel = _FakeKernel(slice_)
+        monkeypatch.setattr(sb, "_write_memory_reclaim", kernel)
+
+        _run(expect_thread=False)
+        assert kernel.writes == []

@@ -424,13 +424,29 @@ def _no_real_cgroup_reclaim_write():
 
 @pytest.fixture(autouse=True)
 def _fail_on_refused_real_reclaim_write(_no_real_cgroup_reclaim_write):
-    """Fail the test during whose run a real-cgroupfs reclaim write was refused.
+    """Disarm the slice reclaim for the test, and fail it if a real write was refused.
 
-    A write refused after its test ended (a reclaim thread nobody joined) is
-    reported by the next test that runs on this worker.
+    Every test starts with the reclaim disarmed, so a test that drives the
+    resource-pressure sampler never reaches the operator's live slice: whether
+    that slice is near its ``memory.high`` depends on the host, and a test's
+    result must not. A test of the reclaim itself re-arms it against a
+    fabricated cgroup tree (``test_agents_slice_reclaim.py``'s ``cg`` fixture).
+    The flag is restored afterwards, so a disarm that a test caused does not
+    leak into the next one.
+
+    The refused-write check stays as the backstop. A write refused after its
+    test ended (a reclaim thread nobody joined) is reported by the next test
+    that runs on this worker.
     """
+    from kiro_crew import sandbox_slice
+
+    was_disarmed = sandbox_slice._SLICE_RECLAIM_DISARMED
+    sandbox_slice._SLICE_RECLAIM_DISARMED = True
     _REFUSED_REAL_RECLAIM_WRITES.clear()
-    yield
+    try:
+        yield
+    finally:
+        sandbox_slice._SLICE_RECLAIM_DISARMED = was_disarmed
     refused = list(_REFUSED_REAL_RECLAIM_WRITES)
     _REFUSED_REAL_RECLAIM_WRITES.clear()
     if refused:
