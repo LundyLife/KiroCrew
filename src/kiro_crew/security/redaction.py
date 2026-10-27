@@ -153,6 +153,50 @@ def _sri_digest_spans(text: str) -> frozenset[tuple[int, int]]:
     return frozenset(m.span(m.lastgroup) for m in _SRI_INTEGRITY_RE.finditer(text) if m.lastgroup)
 
 
+# ── ARN resource ids the bare-secret pass leaves alone ──
+# An Amazon Resource Name is `arn:<partition>:<service>:<region>:<account>:<resource>`.
+# Its resource part is an identifier, and some shapes glue a mixed-case,
+# digit-bearing name to a hex id with `/` (an ELB target group:
+# `targetgroup/MyProdWebAppTargetGroupV2/73e2d6bc24d8a067`). `/` is in the run
+# alphabet, so that tail is one run, and a window across the name and the id
+# clears every gate of `_looks_like_secret_key`. As with `_SRI_INTEGRITY_RE`, no
+# gate can tell that window from a key, so the decision is made on the closed
+# shape around it:
+#   * the literal lowercase `arn:` right after a character that cannot occur
+#     in an ARN or a run, so a lookalike glued to a word (`myarn:aws:...`) fails;
+#   * a partition (`aws` plus any `-suffix`), a lowercase service, a possibly
+#     empty region, and an account of EXACTLY 12 digits, each closed by `:`;
+#   * the resource, which stops at the first character outside the ARN
+#     resource characters this accepts (letters, digits, `+/_.:@-`), so a key
+#     after a space, quote, comma or `=` is outside the span.
+# Only a run lying wholly inside the resource part is exempt, and never a run
+# that is itself one whole key (exactly 40 characters clearing every gate), so a
+# key written as the entire resource still redacts. A key on the same line, in
+# another field, or behind an ARN with no 12-digit account (S3, a lookalike
+# prefix, an 11- or 13-digit id) is judged as before, and every pass-1, pass-2
+# and pass-4 hit is unchanged.
+#
+# ACCEPTED RESIDUAL: a secret a writer deliberately glues into a longer
+# resource run of a real-shaped ARN (`...:123456789012:name/<secret>`) is
+# byte-identical to a resource id and is not redacted by pass 3. That placement
+# is not an accidental leak, and pass 3 is no control against it.
+_ARN_RESOURCE_RE = re.compile(
+    r"(?<![A-Za-z0-9+/_.:@-])arn:aws(?:-[a-z]+)*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:"
+    r"(?P<resource>[A-Za-z0-9+/_.:@-]+)"
+)
+
+
+def _arn_resource_spans(text: str) -> list[tuple[int, int]]:
+    """Return the span of the resource part of every ARN in *text*, sorted and disjoint."""
+    return [m.span("resource") for m in _ARN_RESOURCE_RE.finditer(text)]
+
+
+def _inside_arn_resource(spans: list[tuple[int, int]], start: int, end: int) -> bool:
+    """Whether ``[start, end)`` lies wholly inside one of the sorted, disjoint *spans*."""
+    i = bisect.bisect_right(spans, start, key=lambda span: span[0]) - 1
+    return i >= 0 and spans[i][0] <= start and end <= spans[i][1]
+
+
 #: Code-point ranges of the printable-ASCII tail of the standard baseline JPEG AC
 #: Huffman symbol table -- the ``HUFFVAL`` list of ITU-T T.81 Annex K, Table K.5 --
 #: in the order the table writes them. Everything before and after this tail is
@@ -1098,6 +1142,7 @@ def _credential_redaction_plan(
     pass3: list[_RedactionSpan] = []
     link_spans: list[tuple[int, int]] | None = None
     digest_spans: frozenset[tuple[int, int]] = frozenset()
+    arn_spans: list[tuple[int, int]] | None = None
     for m in bare_runs:
         run_end = m.start() + len(m.group().rstrip("="))
         run = text[m.start() : run_end]
@@ -1141,6 +1186,12 @@ def _credential_redaction_plan(
         if (m.start(), run_end) in digest_spans or any(
             start <= m.start() and run_end <= end for start, end in link_spans
         ):
+            continue
+        # A run wholly inside the resource part of an ARN is its resource id
+        # (see `_ARN_RESOURCE_RE`); found lazily for the same reason.
+        if arn_spans is None:
+            arn_spans = _arn_resource_spans(text)
+        if not _looks_like_secret_key(run) and _inside_arn_resource(arn_spans, m.start(), run_end):
             continue
         for piece_start, piece_end in pieces:
             piece = text[piece_start:piece_end]
