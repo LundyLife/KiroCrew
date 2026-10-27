@@ -17,7 +17,7 @@
  * so the tests can pin it without a DOM.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
@@ -343,6 +343,28 @@ export const recordingQueryKey = (sessionKey: string, turnId: string) => ['brows
 
 /** How often a recording still being written is read again. */
 export const LIVE_RECORDING_REFRESH_MS = 2000
+
+/**
+ * The last recorded frame of one turn, as an image URL, or null. The done card's
+ * thumbnail when this page holds no frame of the turn: the card was rebuilt from
+ * an event after a reload or a reconnect (frames live only in memory), or every
+ * frame of the turn reached the gateway's recorder while no card was showing.
+ */
+export function useRecordedThumb(sessionKey: string, turnId: string, enabled: boolean): string | null {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!enabled) return
+    const ctl = new AbortController()
+    api.browserLiveRecordings(sessionKey, ctl.signal)
+      .then((raw) => {
+        const hit = raw === null ? undefined : readRecordingList(raw).find(r => r.turnId === turnId)
+        setUrl(hit && hit.frameCount > 0 ? browserLiveFrameUrl(sessionKey, turnId, hit.frameCount - 1) : null)
+      })
+      .catch(() => { /* no recording: the globe stays */ })
+    return () => ctl.abort()
+  }, [sessionKey, turnId, enabled])
+  return enabled ? url : null
+}
 
 /** The session's recorded turns, or null when the gateway keeps none. */
 export function useRecordingList(sessionKey: string | null, enabled: boolean) {

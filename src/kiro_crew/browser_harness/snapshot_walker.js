@@ -494,6 +494,16 @@
           if (!el || el.nodeType !== 1) continue;
           var tag = el.tagName.toLowerCase();
           if (tag === "script" || tag === "style" || tag === "noscript" || tag === "template" || tag === "head") continue;
+          // A `display: contents` wrapper draws no box of its own (0 x 0, no
+          // offsetParent), but its children do: walk through it, emitting nothing
+          // for it, and let each child judge its own visibility. A login form
+          // wrapped in one (Adobe, ok.ru, Notion) is otherwise cut whole.
+          var cs = window.getComputedStyle(el);
+          if (cs && cs.display === "contents") {
+            walk(el, depth, frames);
+            if (el.shadowRoot) walk(el.shadowRoot, depth, frames);
+            continue;
+          }
           if (!visible(el)) continue;
           if (isFrame(el)) {
             var title = (el.getAttribute("title") || el.getAttribute("name") || "").trim().slice(0, NAME_CAP);

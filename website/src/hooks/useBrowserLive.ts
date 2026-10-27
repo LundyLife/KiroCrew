@@ -445,7 +445,10 @@ class BrowserLiveStore {
       quiet(this.writes.ack(key, frame.header.seq, frame.header.stream ?? ''))
     }
     const turn = s.current
-    if (!turn || isEnded(turn.state)) return
+    // An ended turn takes no more frames, but one still in flight when the turn
+    // ended (a quick turn whose page painted late) is kept if the turn has none:
+    // it is the done card's thumbnail instead of a globe.
+    if (!turn || (isEnded(turn.state) && turn.hasFrame)) return
     turn.ring.push(frame)
     if (!turn.hasFrame) {
       const withFrame = { ...turn, hasFrame: true }

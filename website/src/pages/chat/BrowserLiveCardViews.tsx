@@ -14,6 +14,7 @@ import { sanitizeLlmOutput } from '../../utils/sanitize'
 import type { BrowserKind, BrowserLiveStep, BrowserLiveTurn } from '../../hooks/useBrowserLive'
 import type { BrowserHandbackSaid } from '../../api/client/browserLive'
 import type { FrameSize } from '../../hooks/useBrowserLive.input'
+import { useRecordedThumb } from '../../hooks/useBrowserLive.replay'
 import BrowserLiveCardCanvas, { type BrowserLiveCanvasHandle } from './BrowserLiveCardCanvas'
 import { frameBoxStyle, useFrameMaxHeight } from './browserLiveFit'
 import { BrowserLiveHandbackBar } from './BrowserLiveHandback'
@@ -348,7 +349,11 @@ export function BrowserLiveDoneRow({ turn, onScreen, canvasRef, onReplay, onOpen
   else if (turn.browser === 'user_chrome' || turn.browser === 'edge') parts.push(i18nT('pages.chat.browserLiveCard.tab_kept_open'))
   // The thumbnail is a shortcut to the first button: Open live when the tab is
   // still there, else Replay.
-  const thumbAction = canOpenLive ? onOpenLive : turn.hasFrame ? onReplay : undefined
+  // No frame in this page's memory (rebuilt after a reload or reconnect, or the
+  // frames went to the recorder while no card showed): the recording's last one.
+  const recorded = useRecordedThumb(turn.sessionKey, turn.turnId, !turn.hasFrame && onScreen)
+  const replayable = turn.hasFrame || !!recorded
+  const thumbAction = canOpenLive ? onOpenLive : replayable ? onReplay : undefined
   const thumbLabel = canOpenLive
     ? i18nT('pages.chat.browserLiveCard.open_live')
     : i18nT('pages.chat.browserLiveCard.replay_steps', { count })
@@ -380,6 +385,13 @@ export function BrowserLiveDoneRow({ turn, onScreen, canvasRef, onReplay, onOpen
             interactive={false}
             aria-label={i18nT('pages.chat.browserLiveCard.last_frame_label', { host })}
           />
+        ) : recorded ? (
+          <img
+            src={recorded}
+            alt={i18nT('pages.chat.browserLiveCard.last_frame_label', { host })}
+            className="absolute inset-0 h-full w-full object-cover object-top"
+            data-testid="browser-live-done-recorded"
+          />
         ) : (
           <div className="absolute inset-0 grid place-items-center text-muted"><Globe size={22} aria-hidden="true" /></div>
         )}
@@ -405,7 +417,7 @@ export function BrowserLiveDoneRow({ turn, onScreen, canvasRef, onReplay, onOpen
               {i18nT('pages.chat.browserLiveCard.open_live')}
             </Btn>
           )}
-          {turn.hasFrame && (
+          {replayable && (
             <Btn onClick={onReplay} data-testid="browser-live-replay">
               <Play size={13} aria-hidden="true" />
               {i18nT('pages.chat.browserLiveCard.replay_steps', { count })}

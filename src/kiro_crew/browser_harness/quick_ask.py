@@ -354,6 +354,31 @@ _INSPECT_JS = """function () {
   var hitRoot = root && root.elementFromPoint ? root : d;
   var hit = inView ? hitRoot.elementFromPoint(cx, cy) : null;
   var tag = (el.tagName || '').toLowerCase();
+  // The field's own floating label may sit over its centre (Xiaomi). That is not
+  // an overlay: clicking it focuses this field. Allowed: one of el.labels, or a
+  // <label> holding no control, inside the field's own small wrapper that holds
+  // no other control. Anything else at the centre (a button, a container, another
+  // control, a label of another field) still reads as covered.
+  var ownLabel = function (h) {
+    var lab = h && h.closest ? h.closest('label') : null;
+    if (!lab || lab.contains(el)) return false;
+    if (lab.querySelector('input,select,textarea,button,a[href],iframe')) return false;
+    if (el.labels) for (var i = 0; i < el.labels.length; i++) if (el.labels[i] === lab) return true;
+    if (lab.htmlFor) {
+      // A for= naming ANOTHER element is that element's label. One naming nothing
+      // (Xiaomi: for="account", the field has no id) falls to the wrapper rule.
+      var named = root && root.getElementById ? root.getElementById(lab.htmlFor) : null;
+      if (named && named !== el) return false;
+    }
+    var box = el.parentElement;
+    for (var up = 0; box && up < 2; up++, box = box.parentElement) {
+      if (!box.contains(lab)) continue;
+      var b = box.getBoundingClientRect();
+      if (b.width > r.width * 2 + 48 || b.height > r.height * 3 + 48) return false;
+      return box.querySelectorAll('input,select,textarea,button,a[href],iframe').length === 1;
+    }
+    return false;
+  };
   var text = '';
   if (tag === 'input') text = el.value || ''; else text = el.innerText || el.textContent || '';
   return {
@@ -366,7 +391,7 @@ _INSPECT_JS = """function () {
     disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
     readOnly: el.readOnly === true,
     visible: visible,
-    covered: !(hit && (hit === el || el.contains(hit))),
+    covered: !(hit && (hit === el || el.contains(hit) || ownLabel(hit))),
     rect: [r.left, r.top, r.width, r.height],
     op: op,
     vw: innerWidth, vh: innerHeight,

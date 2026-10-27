@@ -7,6 +7,7 @@ import BrowserLiveCard, { browserLiveAnchor, isBrowserToolMessage } from '../pag
 import TurnBlock from '../pages/chat/TurnBlock'
 import ChatFooter from '../pages/chat/ChatFooter'
 import type { DisplayItem, TurnItem } from '../pages/chat/types'
+import { api } from '../api/client'
 import { browserLiveStore } from '../hooks/useBrowserLive'
 import type { DecodedBrowserFrame } from '../hooks/useBrowserLive.frame'
 
@@ -353,5 +354,47 @@ describe('the finished card reopens live', () => {
     expect(screen.getByTestId('browser-live-open-live')).toBeInTheDocument()
     act(() => browserLiveStore.applyEvent(ev({ turn_id: 't2', state: 'live', turn_over: false })))
     expect(screen.queryByTestId('browser-live-open-live')).toBeNull()
+  })
+})
+
+describe('the done card thumbnail without a frame in memory', () => {
+  // A card rebuilt from the server's done event (another window, a reconnect)
+  // holds no frame: the recording's last frame stands in for the globe.
+  const done = () => act(() => browserLiveStore.applyEvent(ev({ state: 'done', browser: 'kiro_chromium', headless: true, turn_over: true, tab: 'closed' })))
+
+  it('shows the recording\'s last frame and keeps Replay', async () => {
+    const list = vi.spyOn(api, 'browserLiveRecordings').mockResolvedValue({ turns: [{ turn_id: 't1', started_ts: 1, frame_count: 5 }] })
+    done()
+    render(card(false))
+    act(() => intersect(true))
+    const img = await screen.findByTestId('browser-live-done-recorded')
+    expect(img.getAttribute('src')).toBe(`/api/browser/live/${encodeURIComponent(S)}/recordings/t1/frames/4.jpg`)
+    expect(list).toHaveBeenCalledWith(S, expect.anything())
+    expect(screen.getByTestId('browser-live-replay')).toBeInTheDocument()
+  })
+
+  it('keeps the globe when the gateway recorded no frame of the turn', async () => {
+    vi.spyOn(api, 'browserLiveRecordings').mockResolvedValue({ turns: [{ turn_id: 't1', started_ts: 1, frame_count: 0 }] })
+    done()
+    render(card(false))
+    act(() => intersect(true))
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByTestId('browser-live-done-recorded')).toBeNull()
+    expect(screen.queryByTestId('browser-live-replay')).toBeNull()
+  })
+})
+
+describe('a frame that lands after a quick turn ended', () => {
+  it('is kept as the thumbnail when the turn had none, and only then', () => {
+    act(() => {
+      browserLiveStore.applyEvent(ev())
+      browserLiveStore.applyEvent(ev({ state: 'done', turn_over: true }))
+      browserLiveStore.applyFrame(frame(1)) // was in flight as the turn ended
+    })
+    const turn = browserLiveStore.sessionTurns(S).find(t => t.turnId === 't1')!
+    expect(turn.hasFrame).toBe(true)
+    expect(turn.ring.length).toBe(1)
+    act(() => browserLiveStore.applyFrame(frame(2)))
+    expect(browserLiveStore.sessionTurns(S).find(t => t.turnId === 't1')!.ring.length).toBe(1)
   })
 })

@@ -90,7 +90,7 @@ describe('a focused password input inside an open shadow root', () => {
     pass.focus()
     expect(document.activeElement).toBe(host) // the host, which is the bug's shape
     const active = evalWalker().activeField()
-    expect(active).toEqual({ focused: true, password: true, asked: false, tag: 'input' })
+    expect(active).toEqual({ focused: true, password: true, asked: false, tag: 'input', hasFocus: true })
   })
 
   it('is masked in the live frame: the mask expression walks open shadow roots', () => {
@@ -143,7 +143,7 @@ describe('a quick-ask field the person filled inside an open shadow root', () =>
     const ref = w.snapshot().nodes.find((n) => n.role === 'textbox' && !n.state?.password)?.ref
     expect(w.focus(ref as string)).toEqual({ ok: false, code: 'asked_field' })
     user.focus()
-    expect(w.activeField()).toEqual({ focused: true, password: false, asked: true, tag: 'input' })
+    expect(w.activeField()).toEqual({ focused: true, password: false, asked: true, tag: 'input', hasFocus: true })
   })
 
   it('blocks every value-attribute probe, so the value cannot be spelled out', () => {
@@ -180,7 +180,7 @@ describe('the top-document case still works the same', () => {
     pass.type = 'password'
     document.body.appendChild(pass)
     pass.focus()
-    expect(evalWalker().activeField()).toEqual({ focused: true, password: true, asked: false, tag: 'input' })
+    expect(evalWalker().activeField()).toEqual({ focused: true, password: true, asked: false, tag: 'input', hasFocus: true })
     expect(evalMask()).toEqual([[10, 20, 200, 24]])
     expect(evalMaskReply()).toEqual({ boxes: [[10, 20, 200, 24]], frames: [], partial: false, sx: 0, sy: 0 })
   })

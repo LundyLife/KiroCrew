@@ -158,11 +158,14 @@ describe('applyFrame: ack once, keep, paint', () => {
     expect(browserLiveStore.current(S)).toBeNull()
   })
 
-  it('a frame after done is acked but not kept', () => {
+  it('a frame after done is acked; only one landing on a turn with none is kept (its thumbnail)', () => {
     browserLiveStore.applyEvent(ev({ state: 'done' }))
     browserLiveStore.applyFrame(frame(1))
     expect(writes.ack).toHaveBeenCalledWith(S, 1, 's1')
-    expect(browserLiveStore.current(S)!.ring.length).toBe(0)
+    expect(browserLiveStore.current(S)!.ring.length).toBe(1)
+    browserLiveStore.applyFrame(frame(2))
+    expect(writes.ack).toHaveBeenCalledWith(S, 2, 's1')
+    expect(browserLiveStore.current(S)!.ring.length).toBe(1)
   })
 
   it('the websocket binary branch decodes and lands a frame here', () => {
