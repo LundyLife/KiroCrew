@@ -12515,7 +12515,7 @@
         "sign_in": "Se connecter",
         "signing_in": "Connexion…",
         "sign_in_not_saved": "Utilisé uniquement pour cette connexion à {{host}}, puis effacé. Jamais enregistré.",
-        "take_over_instead_hint": "Clé d'accès ou puzzle ?",
+        "take_over_instead_hint": "Clé d'accès ou puzzle ?",
         "take_over_instead": "Prendre la main sur la page",
         "error_no_field": "Kiro n'a pas trouvé où saisir sur cet écran. Prends la main pour terminer sur la page.",
         "secure_sign_in": "Connexion sécurisée",
