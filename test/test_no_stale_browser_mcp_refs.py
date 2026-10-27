@@ -77,3 +77,23 @@ def test_pattern_catches_the_references_this_change_removed() -> None:
     # ...and not on our own package, or the one tool that replaced them.
     assert not REMOVED.search("from kiro_crew.browser_harness import ops")
     assert not REMOVED.search("the `browser` tool's navigate op")
+
+
+#: A spelled-out op list (``op=navigate|back|...``), the form the prompt and skills use.
+_OP_LIST = re.compile(r"\bop=([a-z_]+(?:\|[a-z_]+)+)")
+
+
+def test_every_spelled_out_op_list_is_the_tools_own() -> None:
+    """A list that lags the tool's enum tells the agent an op does not exist.
+
+    The prompt's list once stopped at ``tabs``, and an agent refused to call
+    ``ask`` because of it, while the tool's own schema offered it.
+    """
+    from kiro_crew.browser_harness.ops import OPS
+
+    seen = 0
+    for path in _agent_facing_files():
+        for match in _OP_LIST.finditer(path.read_text(encoding="utf-8")):
+            seen += 1
+            assert tuple(match.group(1).split("|")) == OPS, path.relative_to(ROOT)
+    assert seen >= 2, "the prompt and the kirocrew-commands skill both spell the list"

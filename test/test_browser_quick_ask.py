@@ -13,7 +13,9 @@ the card's state -- ever contains it.
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import inspect
 import json
 import logging
 import re
@@ -918,3 +920,101 @@ def test_the_tool_description_routes_secrets_to_ask() -> None:
     desc = tool.schemas()[0]["description"]
     assert "ask {kind" in desc and "never solve" in desc and "untrusted" in desc
     assert "ask" in tool.BROWSER_OPS
+
+
+def _refusal_codes() -> set[str]:
+    """Every code an ask can come back refused with, read from the source that raises it."""
+    codes: set[str] = set()
+    for module, call in ((qa, "AskError"), (browser_ask, "_refused")):
+        for node in ast.walk(ast.parse(inspect.getsource(module))):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "id", getattr(node.func, "attr", "")) == call
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                codes.add(node.args[0].value)
+    # target_problem/owner_problem return their codes for bind_ask to raise.
+    for fn in (qa.target_problem, qa.owner_problem):
+        for node in ast.walk(ast.parse(inspect.getsource(fn))):
+            if isinstance(node, ast.Return) and isinstance(node.value, ast.Constant):
+                if node.value.value:
+                    codes.add(node.value.value)
+    return codes
+
+
+#: One word or phrase each refusal's text must carry: its own cause, not a blanket line.
+_REFUSAL_SAYS = {
+    "bad_args": "args must be an object",
+    "bad_kind": "kind must be one of: credentials, text, otp, human_check, confirm",
+    "bad_reason": "reason is missing",
+    "bad_targets": "'role=ref'",
+    "bad_ref": "not a snapshot ref",
+    "bad_digits": "otp needs digits",
+    "bad_summary": "confirm needs summary",
+    "busy": "another ask is still open",
+    "no_live_view": "no live card",
+    "not_web_page": "about:blank, srcdoc",
+    "ref_stale": "no longer on the page",
+    "gone": "left the page",
+    "hidden": "hidden or too small",
+    "covered": "off screen",
+    "wrong_type": "wrong element for its role",
+    "disabled": "disabled or read-only",
+    "too_large": "bigger than a challenge box",
+    "no_button_text": "no visible text",
+    "cross_frame": "not in the frame its ref came from",
+    "nested_frame": "frame inside another frame",
+    "frame_unverified": "could not be checked",
+    "frame_transformed": "scaled or rotated",
+    "transparent": "see-through or masked",
+    "cdp_failed": "did not answer",
+}
+
+
+def test_every_refusal_code_has_its_own_hint() -> None:
+    codes = _refusal_codes()
+    assert codes == set(tool._ASK_REFUSAL_HINT) == set(_REFUSAL_SAYS)
+    hints = list(tool._ASK_REFUSAL_HINT.values())
+    assert len(set(hints)) == len(hints)
+
+
+@pytest.mark.parametrize("code", sorted(_REFUSAL_SAYS))
+def test_a_refusal_says_what_its_code_means(code: str) -> None:
+    text = tool._ask_text("refused", code)
+    assert text.startswith(f"Browser ask: refused({code}). Nothing was shown to the user; ")
+    assert _REFUSAL_SAYS[code] in text
+    assert "fix the targets" not in text
+
+
+def test_an_ask_with_no_reason_is_told_the_reason_is_missing() -> None:
+    args = {"kind": "credentials", "targets": ["username=e1", "password=e2"]}
+    with pytest.raises(qa.AskError) as err:
+        qa.parse_ask(args)
+    text = tool._ask_text("refused", err.value.code)
+    assert "refused(bad_reason)" in text and "reason is missing" in text
+
+
+def test_passed_says_to_check_the_page_before_calling_it_signed_in() -> None:
+    text = tool._ask_text("passed")
+    assert "does not mean the sign-in succeeded" in text and "snapshot" in text
+
+
+def test_the_description_carries_the_ask_param_table() -> None:
+    desc = tool.schemas()[0]["description"]
+    for row in (
+        "| param | required | meaning |",
+        "| kind | yes | credentials, text, otp, human_check, confirm |",
+        "| reason | yes |",
+        "| targets | per kind |",
+        "| label | no | text only",
+        "| digits | otp: yes | otp only: the code length, 4-10 |",
+        "| summary | confirm: yes | confirm only",
+    ):
+        assert row in desc
+    assert (
+        "credentials: username (optional), password (required); text: text; otp: otp; "
+        "human_check: widget; confirm: action"
+    ) in desc
+    assert "credentials with NO targets" in desc

@@ -130,7 +130,7 @@ Override with `PORT=` in `~/.kiro/crew/pods/<name>.env`.
 ## Browsing (`browser` MCP tool)
 
 Browsing is not a `kirocrew` subcommand. It is the **`browser` MCP tool**:
-`op=navigate|back|snapshot|click|drag|scroll|type|press_key|hover|select_option|wait_for|console|screenshot|tabs`.
+`op=navigate|back|snapshot|click|drag|scroll|type|press_key|hover|select_option|wait_for|console|screenshot|tabs|reflex|ask`.
 It drives one browser the gateway owns (the user's own Chrome where there is
 one, Edge on Windows without Chrome, otherwise Kiro's headless Chromium), and the
 user watches the page live in the chat, where one click takes over. It opens
@@ -146,8 +146,9 @@ public `http(s)` URLs only, plus loopback origins the user listed under
 | `tabs {action: list\|switch\|new}` | The tabs the agent opened, and only those |
 
 **Browsing workflow:** load the `web-browse`, `web-verify`, or `browser-auth`
-skill for the task. A sign-in, CAPTCHA or 2FA is the user's step: ask them to
-take over the live view; your next op waits until they hand it back, then runs.
+skill for the task. A sign-in, CAPTCHA or 2FA is the user's step: use the `ask`
+op (the tool's description lists its args), or ask them to take over the live
+view; your next op waits until they hand it back, then runs.
 
 **Setup:** **Settings → Browser** installs the engine on the gateway's machine
 and, on a desktop, connects the user's own Chrome (enable
