@@ -115,6 +115,26 @@ class TestRefreshFromVault:
         assert "start_url" not in sessions_mod._usage_cache
 
     @pytest.mark.asyncio
+    async def test_identity_center_reading_carries_whoami_parity_fields(self):
+        # The account modal on the vault route shows what `kirocrew kas whoami`
+        # and kiro-cli's whoami show -- the e-mail (from the API), the
+        # account type and the Identity Center portal (from the vault).
+        portal = "https://acme.awsapps.com/start"
+        claims = {"identity": "identity_center", "provider": "Enterprise", "start_url": portal}
+        usage = {**_USAGE, "email": "user@example.com", "account": "KiroProfile-us-east-1"}
+        patches = _vault(result=api.UsageResult(usage, api.AUTH_OK))
+        fp_iter = iter((_FP_A, _FP_A))
+        patches[0] = patch(
+            "kiro_crew.auth.bridge.vault_identity_claims", lambda: (next(fp_iter), dict(claims))
+        )
+        await _run(patches)
+        cache = sessions_mod._usage_cache
+        assert cache["email"] == "user@example.com"
+        assert cache["account_type"] == "IamIdentityCenter"
+        assert cache["start_url"] == portal
+        assert cache["account"] == "KiroProfile-us-east-1"
+
+    @pytest.mark.asyncio
     async def test_not_vault_owned_takes_kiro_cli_path(self):
         resolve = await _run(_vault(), vault_owned=False)
         resolve.assert_called_once()
@@ -579,7 +599,57 @@ class TestFetchWithCredential:
         assert result.usage["credits_plan"] == 1000.0
         assert result.usage["_profile_arn"] == arn
         assert result.usage["account"] == "Team"
-        assert posted[-1] == (api._TARGET_GET_USAGE, {"origin": "AI_EDITOR", "profileArn": arn})
+        assert posted[-1] == (
+            api._TARGET_GET_USAGE,
+            {"origin": "AI_EDITOR", "profileArn": arn, "isEmailRequired": True},
+        )
+
+    def test_vault_reading_carries_the_account_email(self):
+        # The vault stores no e-mail, so the vault credential asks GetUsageLimits
+        # for it the way kiro-cli does; the modal shows it as kiro-cli's whoami does.
+        body = {**_CREDIT_BODY, "userInfo": {"userId": "u-1", "email": "user@example.com"}}
+        with patch.object(api, "_post", lambda *a, **k: _resp(200, body)):
+            result = api.fetch_usage_limits_with_credential(
+                "FAKE-tok", "arn:aws:codewhisperer:us-east-1:1:profile/p"
+            )
+        assert result.usage["email"] == "user@example.com"
+
+    @pytest.mark.parametrize(
+        "user_info",
+        [
+            None,
+            {"userId": "u-1"},
+            {"email": ""},
+            {"email": 42},
+            {"email": "no-at-sign"},
+            {"email": "a b@example.com"},
+            {"email": "x" * 250 + "@example.com"},
+            "not-a-dict",
+        ],
+    )
+    def test_unusable_email_is_left_out(self, user_info):
+        body = dict(_CREDIT_BODY)
+        if user_info is not None:
+            body["userInfo"] = user_info
+        with patch.object(api, "_post", lambda *a, **k: _resp(200, body)):
+            result = api.fetch_usage_limits_with_credential(
+                "FAKE-tok", "arn:aws:codewhisperer:us-east-1:1:profile/p"
+            )
+        assert result.usage["credits_plan"] == 1000.0
+        assert "email" not in result.usage
+
+    def test_discovered_candidates_do_not_ask_for_email(self):
+        # The kiro-cli path names the account from whoami; its request is unchanged.
+        posted = []
+
+        def fake_post(token, target, payload, *, endpoint=None):
+            posted.append(payload)
+            return _resp(200, {**_CREDIT_BODY, "userInfo": {"email": "user@example.com"}})
+
+        with patch.object(api, "_post", fake_post):
+            attempt = api._get_usage("FAKE-tok", None, name_anchor=None, endpoint="e")
+        assert posted == [{"origin": "AI_EDITOR"}]
+        assert "email" not in attempt.result.usage
 
     def test_no_stored_arn_uses_listed_profile_and_its_region(self):
         region = next(r for r in api._RTS_ENDPOINTS if r != api._DEFAULT_RTS_REGION)
