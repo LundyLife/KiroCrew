@@ -544,7 +544,7 @@ export default function ChatPane({
   })
   const { recoverInto: recoverQuoteInto } = messageQuote
 
-  const { stopError, dismissStopError, paneStopState, onStop } = useChatPaneStop({ slotKey, busy: composerBusy, paneSlot, dispatch })
+  const { stopError, stopErrorDetail, dismissStopError, paneStopState, onStop } = useChatPaneStop({ slotKey, busy: composerBusy, paneSlot, dispatch })
   // The endpointer auto-submit (handed to the Voice atom above) is an Enter
   // press: the composer's default busy decision with this pane's own composer
   // inputs (never the flipped chord), so it steers where Send would steer.
@@ -994,7 +994,9 @@ export default function ChatPane({
           variant="inline"
           className="mx-4 mt-2"
           testId="chat-pane-stop-error"
-          message={stopError}
+          title={stopErrorDetail ? stopError : undefined}
+          message={stopErrorDetail || stopError}
+          messagePlacement="below"
           onDismiss={dismissStopError}
         />
         {/* No hand-off: the composer draft is untouched by a refused Resume.
