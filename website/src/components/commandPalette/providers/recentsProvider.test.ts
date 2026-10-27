@@ -1,7 +1,8 @@
 import { renderHook } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChatSlot } from '../../../types'
+import { resetCrewModeCatalog, setCrewModeCatalog } from '../../../lib/crewMode'
 import { slotRecency } from '../slotRecency'
 import {
   hasPlaceholderTitle,
@@ -40,6 +41,9 @@ vi.mock('../../../store', () => ({
 vi.mock('react-router-dom', () => ({
   useNavigate: () => mocks.navigate,
 }))
+
+const apiMock = vi.hoisted(() => ({ sessions: vi.fn() }))
+vi.mock('../../../api/client', () => ({ api: apiMock }))
 
 vi.mock('@tanstack/react-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-query')>()
@@ -486,5 +490,45 @@ describe('useRecentsProvider — Older dedupe against live slots', () => {
     expect(rows.filter((r) => r.id === 'recents:cur:chat-2-2')).toHaveLength(0)
     // ...and must NOT come back as an Older row.
     expect(rows.filter((r) => r.id === 'recents:old:dashboard_chat-2-2')).toHaveLength(0)
+  })
+})
+
+/**
+ * The Older group is the person's own History. The server leaves a Crew Mode
+ * root's workers out of that list only on its `user_only` read (the sidebar's
+ * History read), so the palette must ask for the same list: without the flag a
+ * closed worker came back as an Older row while the sidebar hid it.
+ */
+describe('useRecentsProvider — Older is the person\'s History', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.state.dashboard.slots = []
+    mocks.state.dashboard.unreadSlots = []
+    mocks.state.chat.slotStatusDetail = {}
+    // Run the history queryFn for real; answer the others empty.
+    mocks.fetchQuery.mockImplementation(({ queryKey, queryFn }: { queryKey: unknown[]; queryFn: () => unknown }) =>
+      queryKey[2] === 'history' ? Promise.resolve(queryFn()) : Promise.resolve([]))
+    apiMock.sessions.mockResolvedValue({ sessions: [] })
+  })
+
+  afterEach(() => resetCrewModeCatalog())
+
+  it('on a Crew Mode gateway reads History with user_only, the read that leaves Crew Mode workers out', async () => {
+    setCrewModeCatalog('kirocrew-conductor', ['kirocrew-conductor'])
+    const { renderHook } = await import('@testing-library/react')
+    const { result } = renderHook(() => useRecentsProvider())
+    await result.current.search('')
+    expect(apiMock.sessions).toHaveBeenCalledWith(20, 0, true, false, true)
+  })
+
+  it('on a gateway without Crew Mode keeps the full inventory it always read', async () => {
+    // No catalog yet, then a catalog with no Crew Mode fields: the same read as today either way.
+    const { renderHook } = await import('@testing-library/react')
+    const { result } = renderHook(() => useRecentsProvider())
+    await result.current.search('')
+    expect(apiMock.sessions).toHaveBeenLastCalledWith(20, 0, true, false, false)
+    setCrewModeCatalog(undefined, undefined)
+    await result.current.search('')
+    expect(apiMock.sessions).toHaveBeenLastCalledWith(20, 0, true, false, false)
   })
 })

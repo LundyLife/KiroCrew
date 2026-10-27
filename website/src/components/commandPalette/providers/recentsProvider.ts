@@ -1,4 +1,6 @@
 import { createElement, useMemo } from 'react'
+import { selectPersonSlots } from '../../../store/dashboardSlice'
+import { gatewayRunsCrewMode } from '../../../lib/crewMode'
 import { MessageSquare, Clock } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -250,7 +252,11 @@ export function useRecentsProvider(): ResourceProvider {
   const store = useAppStore()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const slots = useAppSelector(selectSlotsWithLiveLastTs)
+  // The person's list: a Crew Mode root's workers are its side panel's to show.
+  const slots = useAppSelector(selectPersonSlots)
+  // Every live row, workers included: a worker is left out of Current, and must
+  // not come back as an Older history row either.
+  const liveSlots = useAppSelector(selectSlotsWithLiveLastTs)
   const unread = useAppSelector((s) => s.dashboard.unreadSlots)
   const slotStatusDetail = useAppSelector((s) => s.chat.slotStatusDetail ?? {})
   const simplifiedToolNames = useSimplifiedToolNames()
@@ -259,18 +265,25 @@ export function useRecentsProvider(): ResourceProvider {
     const { ordered: orderedSlots, hasEmptyNew } = prepareCurrentSlots(slots)
     // Dedupe Older against ALL live slots (not just rendered ones) so a
     // filtered-out empty duplicate can't resurface as a history row.
-    const currentKeys = new Set(slots.map((s) => normalizeKey(s.key)))
+    const currentKeys = new Set(liveSlots.map((s) => normalizeKey(s.key)))
 
     return {
       id: 'recents',
       label: i18nT('components.commandPalette.providers.recentsProvider.recent'),
       icon: sessionIcon(),
       async search(): Promise<Result[]> {
+        // Read per search, so a catalog that lands after this memo is honoured;
+        // part of the key, so the two reads never answer for each other.
+        const personHistory = gatewayRunsCrewMode()
         const [hist, crons, foldersResp] = await Promise.all([
           queryClient
             .fetchQuery<HistoryResponse>({
-              queryKey: ['palette', 'recents', 'history'],
-              queryFn: () => api.sessions(HISTORY_LIMIT, 0, true),
+              queryKey: ['palette', 'recents', 'history', personHistory],
+              // On a Crew Mode gateway, the person's own History (`user_only`): a
+              // Crew Mode worker, closed or under a closed root, is its conductor's
+              // to show, never an Older row. A gateway without Crew Mode keeps the
+              // full inventory this list always read.
+              queryFn: () => api.sessions(HISTORY_LIMIT, 0, true, false, personHistory),
               staleTime: RECENTS_STALE_MS,
             })
             .catch(() => ({ sessions: [] as HistorySession[] })),
@@ -415,5 +428,5 @@ export function useRecentsProvider(): ResourceProvider {
         return [...current, ...planned, ...older]
       },
     }
-  }, [dispatch, store, navigate, queryClient, slots, unread, slotStatusDetail, simplifiedToolNames])
+  }, [dispatch, store, navigate, queryClient, slots, liveSlots, unread, slotStatusDetail, simplifiedToolNames])
 }
