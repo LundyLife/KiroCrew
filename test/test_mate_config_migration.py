@@ -202,7 +202,7 @@ def test_a_default_template_crewmate_gets_a_file_that_adds_nothing(layout, persi
 def test_a_crewmate_whose_worker_would_lose_a_grant_moves_and_is_told_once(
     layout, persisted, caplog
 ):
-    """2026-10-27 owner decision: a loss no longer keeps a crewmate on its old agent."""
+    """Owner decision: a loss moves the crewmate, and its user is told once."""
     from kiro_crew.mate_upgrade_notice import claim_notice_prompt
     from kiro_crew.members import member_slug
 
@@ -279,6 +279,27 @@ def test_a_grant_the_worker_would_gain_is_withheld_for_the_card(layout, persiste
     }
     _write(mates, "zxc", approved)
     assert "jira" in mate_worker.resolve_worker_spec(dict(BASE), "zxc")["mcpServers"]
+
+
+def test_an_agent_whose_prompt_does_not_resolve_keeps_its_stated_limits(layout, persisted):
+    """It parses, so the deny it states is read; the default template would drop it."""
+    user, mates = layout
+    _write(user, "kirocrew", _template("kirocrew"))
+    deny = {"fs_write": {"deniedPaths": ["/etc/**"]}}
+    _write(
+        user,
+        "careful",
+        _template("careful", prompt="file://missing-prompt.md", toolsSettings=deny),
+    )
+    cfg = _cfg(ijk=KiroCrewAgentConfig(member_id="ijk", kiro_agent="careful"))
+    saved = persisted(cfg)
+
+    report = migrate_existing_crewmates(cfg)
+
+    assert report.migrated == [] and report.moved_from_default == []
+    assert "toolsSettings" in report.dry_run_failed["ijk"]
+    assert cfg.agents["ijk"].kiro_agent == "careful"
+    assert saved == {} and not (mates / "ijk.json").exists()
 
 
 def test_an_unreadable_agent_moves_onto_the_default_template_and_says_so(layout, persisted):
