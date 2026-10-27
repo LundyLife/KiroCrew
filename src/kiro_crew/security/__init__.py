@@ -197,6 +197,7 @@ _EXPORTS: dict[str, str] = {
     "_shell_payload_sources": "argv_floor",
     "_ssh_family_verb": "argv_floor",
     "_static_substitution_output": "argv_floor",
+    "_static_substitution_words": "argv_floor",
     "_unmask_separators": "argv_floor",
     # denied_rules
     "BUILTIN_DENIED_RULES": "denied_rules",
@@ -860,6 +861,7 @@ if TYPE_CHECKING:  # keep the names visible to type checkers and IDEs
         _shell_payload_sources,
         _ssh_family_verb,
         _static_substitution_output,
+        _static_substitution_words,
         _unmask_separators,
     )
     from kiro_crew.security.denied_rules import (  # noqa: F401

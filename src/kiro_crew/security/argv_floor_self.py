@@ -22,6 +22,7 @@ part of the argv floor.
 from __future__ import annotations
 
 import re
+import shlex
 from typing import NamedTuple
 
 # The reader names a test instruments on the facade are reached as attributes of
@@ -410,6 +411,62 @@ def _static_substitution_output(body: str) -> str:
                 continue
             return operand
     return "\x00"
+
+
+#: Characters whose meaning changes when a substitution's output is read back as
+#: command text: quoting, escapes, operators, expansions and comments. Output
+#: carrying any of them is not re-spliced as text by
+#: :func:`_static_substitution_words`.
+_STATIC_OUTPUT_UNSAFE_CHARS = frozenset("'\"\\;&|<>(){}$`#~\n\r")
+
+
+def _is_echo_option(word: str) -> bool:
+    """True for an ``echo`` option word made only of ``n``/``e``/``E`` flags."""
+    return len(word) > 1 and word[0] == "-" and set(word[1:]) <= {"n", "e", "E"}
+
+
+def _static_substitution_words(body: str) -> "str | None":
+    """The FULL output of a literal ``echo``/``printf`` substitution body, else None.
+
+    An unquoted ``$(echo ssh localhost id)`` expands to the three argv words
+    ``ssh localhost id``, so the reconstructed output is every word the command
+    prints, joined by single spaces. :func:`_static_substitution_output` returns
+    one word; this returns the whole line so a caller splicing the output back
+    into the command text reads the argv the shell builds.
+
+    Resolution is literal only: ``echo`` with its leading ``-n``/``-e``/``-E``
+    options consumed, or ``printf`` with a single format operand that carries no
+    ``%`` conversion. Anything else -- a body that does not tokenize, any other
+    program, ``printf`` with arguments or conversions, or output containing a
+    character in :data:`_STATIC_OUTPUT_UNSAFE_CHARS` -- returns None, and the
+    caller falls back to :func:`_static_substitution_output`.
+    """
+    try:
+        words = shlex.split(body)
+    except ValueError:
+        return None
+    if not words:
+        return None
+    program = _shell_normalizer._program_basename(words[0])
+    args = words[1:]
+    if program == "echo":
+        while args and _is_echo_option(args[0]):
+            args = args[1:]
+        output = " ".join(args)
+    elif program == "printf":
+        if args and args[0] == "--":
+            args = args[1:]
+        if len(args) != 1 or "%" in args[0] or args[0].startswith("-"):
+            return None
+        output = _decode_printf_escapes(args[0])
+    else:
+        return None
+    # Command substitution strips only trailing newlines; a trailing space
+    # still separates the output from text glued after it.
+    output = output.rstrip("\n")
+    if not output.strip() or _STATIC_OUTPUT_UNSAFE_CHARS.intersection(output):
+        return None
+    return output
 
 
 # An assignment word (``k=kill``): bash only honours these BEFORE the first

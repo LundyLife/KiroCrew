@@ -500,6 +500,7 @@ EXPORTED_NAMES: tuple[str, ...] = (
     "_ssh_family_verb",
     "_stall_prefix",
     "_static_substitution_output",
+    "_static_substitution_words",
     "_stdin_program_text",
     "_stdin_redirect_carriers",
     "_strip_redirect",

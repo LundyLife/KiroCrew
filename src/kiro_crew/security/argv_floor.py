@@ -179,9 +179,11 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _SELF_FLOOR_QUOTE_JUNK_RE,
         _SELF_IMPORT_RE,
         _SELF_MODULE_SPELLINGS,
+        _STATIC_OUTPUT_UNSAFE_CHARS,
         _bare_kill_raw_bodies,
         _is_credential_mint,
         _is_dev_mode_out_of_root_confirm,
+        _is_echo_option,
         _is_kill_by_name_program,
         _is_self_cloud_destructive,
         _is_self_file_delivery,
@@ -204,6 +206,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _SelfModuleScan,
         _shell_payload_sources,
         _static_substitution_output,
+        _static_substitution_words,
     )
     from kiro_crew.security.argv_floor_ssh import (  # noqa: F401
         _ARITH_INT_LITERAL_RE,

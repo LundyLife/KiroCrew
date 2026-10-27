@@ -532,7 +532,14 @@ def _url_payload_command(n: int) -> str:
 #: substitution may expand to nothing in the program word, and
 #: ``#`` / ``<<`` inside an unpaired ``${…}`` / ``$[…]`` open no comment or heredoc.
 #: Each command is read with and without that tracking. Deny-only: no allow widened.
-_PACKAGE_LINE_BUDGET = 32_635
+#:
+#: Raised by 86, from 32,635, for the ssh self-target floor's literal substitution
+#: reader: ``_static_substitution_words`` expands a literal ``echo``/``printf``
+#: substitution to every word it prints (stripping only trailing newlines), so one
+#: in program position reads as the argv it expands to. A line where any such
+#: output holds a word starting with ``-`` is not spliced. Deny-only: no allow
+#: widened.
+_PACKAGE_LINE_BUDGET = 32_721
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
