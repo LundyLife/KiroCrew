@@ -380,7 +380,7 @@ _INSPECT_JS = """function () {
   var visible = r.width >= 2 && r.height >= 2 && cs.display !== 'none'
     && cs.visibility !== 'hidden' && op > 0.05;
   // Up the COMPOSED tree: a shadow host's opacity hides what is inside its root.
-  var up = function (n) { return n.parentElement || (n.getRootNode && n.getRootNode().host) || null; };
+  var up = function (n) { return n.assignedSlot || n.parentElement || (n.getRootNode && n.getRootNode().host) || null; };
   for (var p = up(el); visible && p; p = up(p)) {
     var ps = getComputedStyle(p);
     op *= parseFloat(ps.opacity || '1') * fop(ps);
@@ -450,7 +450,7 @@ _INSPECT_JS = """function () {
 _INSERT_JS = """function (v, origin) {
   // The document's own origin, read in the same call: a navigation that commits
   // another site between the checks and this write cannot receive the value.
-  if (origin && location.origin !== origin) return false;
+  if (location.origin !== origin) return false;
   var root = this.getRootNode ? this.getRootNode() : document;
   if (root.activeElement !== this) return false;
   return document.execCommand('insertText', false, v) === true;
