@@ -574,6 +574,8 @@ describe('parseSourceLinkUrl', () => {
       .toMatchObject({ provider: 'gitlab', number: 4, repo: 'service', kind: 'change' })
     expect(parseSourceLinkUrl('https://gitlab.com/acme/service/-/issues/8'))
       .toMatchObject({ provider: 'gitlab', number: 8, repo: 'service', kind: 'issue' })
+    expect(parseSourceLinkUrl('https://gitlab.com/acme/service/-/work_items/9'))
+      .toMatchObject({ provider: 'gitlab', number: 9, repo: 'service', kind: 'issue' })
   })
 
   it('canonicalises the url, dropping query, fragment and www', () => {

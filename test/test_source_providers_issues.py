@@ -44,6 +44,15 @@ def test_parse_gitlab_issue_url_with_nested_group() -> None:
     assert ref.url == "https://gitlab.com/acme/platform/service/-/issues/42"
 
 
+def test_parse_gitlab_work_item_url_is_an_issue() -> None:
+    ref = source.parse_source_url("https://gitlab.com/acme/platform/service/-/work_items/42")
+    assert ref.provider == "gitlab"
+    assert ref.project == "acme/platform/service"
+    assert ref.number == 42
+    assert ref.kind == "issue"
+    assert ref.url == "https://gitlab.com/acme/platform/service/-/work_items/42"
+
+
 def test_parse_gitlab_merge_request_still_reports_change_kind() -> None:
     ref = source.parse_source_url("https://gitlab.com/acme/platform/-/merge_requests/9")
     assert ref.kind == "change"

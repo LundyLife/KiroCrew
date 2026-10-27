@@ -436,6 +436,8 @@ export { bitbucketServerHostSet, gerritHostSet }
 const GITLAB_MARKERS: ReadonlyArray<{ marker: string; kind: SourceLinkKind }> = [
   { marker: '/-/merge_requests/', kind: 'change' },
   { marker: '/-/issues/', kind: 'issue' },
+  // GitLab's newer work-item URL for an issue; it shares the issue number space.
+  { marker: '/-/work_items/', kind: 'issue' },
 ]
 
 function gitlabLink(origin: string, path: string): PullRequestLink | null {

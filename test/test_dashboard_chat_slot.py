@@ -516,11 +516,12 @@ class TestChatSlot:
         issue = "https://github.com/acme/widgets/issues/13"
         mr = "https://gitlab.com/acme/widgets/-/merge_requests/14"
         gitlab_issue = "https://gitlab.com/acme/widgets/-/issues/15"
-        slot.append("assistant", f"{pr} {issue} {mr} {gitlab_issue}")
+        work_item = "https://gitlab.com/acme/widgets/-/work_items/16"
+        slot.append("assistant", f"{pr} {issue} {mr} {gitlab_issue} {work_item}")
 
         payload = slot.to_dict()
 
-        assert payload["source_links_total"] == 4
+        assert payload["source_links_total"] == 5
         # Order-insensitive on purpose: this pins the kind MAPPING, and the
         # recency ordering has its own tests below. Asserting a sequence here
         # made it a second, accidental ordering oracle.
@@ -529,6 +530,7 @@ class TestChatSlot:
             issue: "issue",
             mr: "change",
             gitlab_issue: "issue",
+            work_item: "issue",
         }
         assert all("kind" in link for link in payload["source_links"])
 
