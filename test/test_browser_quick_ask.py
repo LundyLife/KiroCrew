@@ -456,6 +456,73 @@ async def test_a_bad_password_target_is_refused_at_ask_time(
     assert hub.get(KEY).ask is None  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize(
+    "over", [{"disabled": True}, {"readOnly": True}, {"visible": False}, {"covered": True}]
+)
+async def test_an_optional_username_out_of_reach_is_left_out_and_the_password_still_asked(
+    over: dict[str, Any],
+) -> None:
+    # avast: the password step disables the email it already holds.
+    page = FakePage()
+    page.add("e3", type="email", text="me@example.invalid", **over)
+    page.add("e4", type="password", rect=[10, 60, 200, 30])
+    hub, _rec = await _live(page)
+    out = await browser_ask.run_ask(hub, KEY, dict(CREDS))
+    assert out["ok"] is True and "ask_id" in out
+    ask = hub.get(KEY).ask  # type: ignore[union-attr]
+    assert [b.role for b in ask.bindings] == ["password"]
+    wire = lh.live_event(hub.get(KEY))["ask"]  # type: ignore[arg-type]
+    assert [f["role"] for f in wire["fields"]] == ["password"]
+    assert qa.check_values(ask, {"password": "x"}) == {"password": "x"}
+    assert qa.check_values(ask, {"username": "u", "password": "x"}) is None
+
+
+@pytest.mark.parametrize(
+    "username, password, code",
+    [
+        ({"type": "checkbox"}, {"type": "password"}, "wrong_type"),
+        ({"connected": False}, {"type": "password"}, "gone"),
+        # Out of reach and holding text, but not a text field: still a wrong target.
+        ({"type": "checkbox", "visible": False, "text": "on"}, {"type": "password"}, "hidden"),
+        # Empty: nothing on the page stands in for it, so the ask is refused.
+        ({"covered": True}, {"type": "password"}, "covered"),
+        ({"disabled": True}, {"type": "password"}, "disabled"),
+        (
+            {"disabled": True, "text": "me@example.invalid"},
+            {"type": "password", "disabled": True},
+            "disabled",
+        ),
+        (
+            {"disabled": True, "text": "me@example.invalid"},
+            {"type": "password", "visible": False},
+            "hidden",
+        ),
+    ],
+)
+async def test_a_wrong_username_or_any_bad_password_still_refuses_the_ask(
+    username: dict[str, Any], password: dict[str, Any], code: str
+) -> None:
+    page = FakePage()
+    page.add("e3", **{"type": "email", **username})
+    page.add("e4", rect=[10, 60, 200, 30], **password)
+    hub, _rec = await _live(page)
+    out = await browser_ask.run_ask(hub, KEY, dict(CREDS))
+    assert out == {"ok": True, "outcome": "refused", "code": code}
+    assert hub.get(KEY).ask is None  # type: ignore[union-attr]
+
+
+def test_the_outline_marks_a_password_field_with_no_ref() -> None:
+    from kiro_crew.browser_harness.ops import format_outline
+
+    def line(why: str) -> str:
+        node = {"depth": 0, "role": "textbox", "name": "Password"}
+        return format_outline([{**node, "state": {"password": True, "unusable": why}}])
+
+    assert line("hidden") == '- textbox "Password" [password] [not usable yet]'
+    assert line("disabled") == '- textbox "Password" [password] [not usable yet]'
+    assert line("covered") == '- textbox "Password" [password] [covered]'
+
+
 async def test_a_stale_ref_and_a_non_web_page_are_refused() -> None:
     page = FakePage()
     hub, _rec = await _live(page)

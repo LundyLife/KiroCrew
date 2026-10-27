@@ -57,6 +57,80 @@
     return true;
   }
 
+  // Why a quick ask would refuse this password input now ("disabled", "hidden",
+  // "covered"), or "" when it could bind it, by the ask's own rule (quick_ask.py
+  // `_INSPECT_JS` + `target_problem`): a box of at least 2 x 2, not hidden or
+  // faded to <= 0.05 up the composed tree, enabled, writable, and at its centre
+  // only itself or its own label. An identifier-first page keeps the next step's
+  // password field in the DOM already hidden, disabled or covered; given a ref,
+  // the agent asked for it and was refused. A field the agent can scroll to (out
+  // of the window, or out of its scroll box's view) keeps its ref; one no scroll
+  // brings in (fixed in place, or before the page's start) is "hidden".
+  function unaskable(el) {
+    if (el.disabled === true || el.readOnly === true || el.getAttribute("aria-disabled") === "true") return "disabled";
+    // A same-origin frame's field: its own window's viewport and styles.
+    var view = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+    var r = el.getBoundingClientRect();
+    var cs = view.getComputedStyle(el);
+    var fop = function (s) {
+      var m = /opacity\(\s*([0-9.]+)(%?)\s*\)/.exec(s.filter || "");
+      return m ? parseFloat(m[1]) / (m[2] ? 100 : 1) : 1;
+    };
+    if (r.width < 2 || r.height < 2 || cs.display === "none" || cs.visibility === "hidden"
+        || parseFloat(cs.opacity || "1") * fop(cs) <= 0.05) return "hidden";
+    // Up the composed tree, as `_INSPECT_JS` walks: through slots and shadow hosts.
+    var up = function (n) { return n.assignedSlot || n.parentElement || (n.getRootNode && n.getRootNode().host) || null; };
+    // The nearest scroll box below any fixed ancestor (the window's own scrolling,
+    // html and body, is the scrollX/scrollY test below), and whether the field is
+    // fixed with no scroll box between: then no scroll moves it.
+    var doc = el.ownerDocument, fixed = cs.position === "fixed", sbox = null;
+    for (var p = up(el); p; p = up(p)) {
+      var ps = view.getComputedStyle(p);
+      if (ps.display === "none" || ps.visibility === "hidden" || parseFloat(ps.opacity || "1") <= 0.05) return "hidden";
+      if (fixed) continue;
+      if (!sbox && p !== doc.body && p !== doc.documentElement
+          && /auto|scroll/.test(ps.overflowX + " " + ps.overflowY)) sbox = p;
+      if (ps.position === "fixed" && !sbox) fixed = true;
+    }
+    var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (sbox) {
+      var b = sbox.getBoundingClientRect();
+      if (cx < b.left || cx >= b.right || cy < b.top || cy >= b.bottom) return "";
+    }
+    if (!(cx >= 0 && cy >= 0 && cx < view.innerWidth && cy < view.innerHeight)) {
+      // Shopify parks a password-manager decoy in a fixed box past the window edge.
+      return !fixed && cx + view.scrollX >= 0 && cy + view.scrollY >= 0 ? "" : "hidden";
+    }
+    var root = el.getRootNode ? el.getRootNode() : el.ownerDocument;
+    var hit = (root && root.elementFromPoint ? root : el.ownerDocument).elementFromPoint(cx, cy);
+    // No answer at all is not proof of an overlay: keep the ref.
+    if (!hit || hit === el || el.contains(hit)) return "";
+    return ownLabel(el, r, root, hit) ? "" : "covered";
+  }
+
+  // quick_ask.py `_INSPECT_JS` `ownLabel`: a control-free <label> inside the
+  // field's own box that is one of its labels or sits in its small wrapper.
+  function ownLabel(el, r, root, h) {
+    var lab = h.closest ? h.closest("label") : null;
+    if (!lab || lab.contains(el)) return false;
+    if (lab.querySelector("input,select,textarea,button,a[href],iframe")) return false;
+    var lr = lab.getBoundingClientRect();
+    if (lr.left < r.left - 8 || lr.top < r.top - 8 || lr.right > r.right + 8 || lr.bottom > r.bottom + 8) return false;
+    if (el.labels) for (var i = 0; i < el.labels.length; i++) if (el.labels[i] === lab) return true;
+    if (lab.htmlFor) {
+      var named = root && root.getElementById ? root.getElementById(lab.htmlFor) : null;
+      if (named && named !== el) return false;
+    }
+    var box = el.parentElement;
+    for (var up = 0; box && up < 2; up++, box = box.parentElement) {
+      if (!box.contains(lab)) continue;
+      var b = box.getBoundingClientRect();
+      if (b.width > r.width * 2 + 48 || b.height > r.height * 3 + 48) return false;
+      return box.querySelectorAll("input,select,textarea,button,a[href],iframe").length === 1;
+    }
+    return false;
+  }
+
   function explicitRole(el) {
     var r = el.getAttribute && el.getAttribute("role");
     return r ? r.trim().toLowerCase() : "";
@@ -476,7 +550,16 @@
         var role = roleFor(el);
         var name = accName(el);
         if (interactive(el, role)) {
-          out.push({ depth: depth, role: role || "generic", name: name, ref: assignRef(el), state: stateOf(el, role) });
+          var st = stateOf(el, role);
+          var why = st.password ? unaskable(el) : "";
+          if (why) {
+            // Listed with no ref, and why: "covered" is a dialog or banner the
+            // agent can close; "hidden"/"disabled" a later step of the sign-in.
+            st.unusable = why;
+            out.push({ depth: depth, role: role || "generic", name: name, state: st });
+            return depth + 1;
+          }
+          out.push({ depth: depth, role: role || "generic", name: name, ref: assignRef(el), state: st });
           return depth + 1;
         }
         if (role === "heading" && name) {

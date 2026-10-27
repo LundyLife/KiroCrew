@@ -819,6 +819,10 @@ _INPUT_KIND = {"username": "text", "password": "password", "otp": "otp"}
 #: Targets the gateway writes into (never clicks): their own floating label may
 #: lie over them (``labelCovered``).
 _FILLED_ROLES = frozenset({"username", "password", "text", "otp"})
+#: Refusals that only mean the page has an optional target out of reach right
+#: now; :func:`bind_ask` drops such a target, when it is already filled, instead
+#: of refusing the ask.
+_DROPPABLE = frozenset({"hidden", "covered", "disabled"})
 
 
 def owner_problem(info: dict[str, Any]) -> str:
@@ -943,9 +947,21 @@ async def bind_ask(probe: PageProbe, spec: AskSpec, scale: float, frames: Any = 
     bindings: list[Binding] = []
     button = ""
     vw = vh = 0.0
+    required = dict(ROLES[spec.kind])
     for role, _p, node, _f in located:
         info = await fprobe.inspect(node, ctx)
         problem = target_problem(role, info)
+        if (
+            problem in _DROPPABLE
+            and not required[role]
+            and info.get("tag") == "input"
+            and info.get("type") in _TEXT_TYPES
+            and info.get("text")
+        ):
+            # An optional target the page has put out of reach while it already
+            # holds a value (a password step that disables the email it was given):
+            # leave it out, ask the rest. An empty one still refuses the ask.
+            continue
         if problem:
             raise AskError(problem)
         x, y, w, h = (float(v) for v in info["rect"])
