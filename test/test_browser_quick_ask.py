@@ -190,6 +190,14 @@ class FakePage:
         if method == "DOM.getFrameOwner":
             f = self.frames.get(params["frameId"])
             return {"backendNodeId": f["owner"]} if f and not f.get("hide_owner") else {}
+        if method == "DOM.getNodeForLocation":
+            # The browser's own hit test: the frame owner unless a decoy (even a
+            # pointer-events: none one) is laid over it.
+            for f in self.frames.values():
+                owner = self.nodes.get(f["owner"]) if f["owner"] else None
+                if owner and owner.get("hit") and not owner.get("decoy"):
+                    return {"backendNodeId": f["owner"]}
+            return {"backendNodeId": 1}
         if method == "DOM.getBoxModel":
             x, y, w, h = self.nodes[params["backendNodeId"]]["content"]
             return {"model": {"content": [x, y, x + w, y, x + w, y + h, x, y + h]}}
@@ -213,6 +221,7 @@ class FakePage:
                     if fid in self.frames:
                         f = self.frames[fid]
                         value["vw"] = f.get("vw") or self.nodes[f["owner"]]["content"][2]
+                        value["vh"] = f.get("vh") or self.nodes[f["owner"]]["content"][3]
             elif fn == qa._HIT_JS:
                 value = bool(self.nodes[node].get("hit"))
             elif fn == qa._INSERT_JS:

@@ -86,7 +86,7 @@ describe('a display: contents wrapper', () => {
   })
 })
 
-interface Inspect { covered: boolean; visible: boolean }
+interface Inspect { covered: boolean; labelCovered: boolean; visible: boolean }
 const inspect = (el: Element): Inspect => (new Function(`return (${inspectSource()})`)() as (this: Element) => Inspect).call(el)
 
 describe('a field under its own floating label', () => {
@@ -101,14 +101,16 @@ describe('a field under its own floating label', () => {
   it('is not covered by that label', () => {
     xiaomi()
     hitAt = () => $('label')
-    expect(inspect($('input'))).toMatchObject({ visible: true, covered: false })
+    // Covered, but only by its own label: quick_ask.target_problem lets that through
+    // for a field it fills, and never for a button it clicks.
+    expect(inspect($('input'))).toMatchObject({ visible: true, covered: true, labelCovered: true })
   })
 
   it('is not covered by a label it names through el.labels', () => {
     html(`<div><input id="em" type="email"><label for="em"><span id="s">Email</span></label></div>`)
     box('div', [0, 0, 300, 40]); box('input', [0, 0, 300, 40]); box('label', [8, 10, 100, 20])
     hitAt = () => $('#s')
-    expect(inspect($('input')).covered).toBe(false)
+    expect(inspect($('input')).labelCovered).toBe(true)
   })
 
   it.each([
@@ -119,27 +121,34 @@ describe('a field under its own floating label', () => {
     xiaomi(extra)
     box(sel, [10, 10, 320, 56])
     hitAt = () => $(sel)
-    expect(inspect($('input')).covered).toBe(true)
+    expect(inspect($('input')).labelCovered).toBe(false)
   })
 
   it('is still covered by its own floating label once the wrapper holds another control', () => {
     xiaomi('<button id="eye">show</button>')
     box('#eye', [300, 20, 20, 20])
     hitAt = () => $('label')
-    expect(inspect($('input')).covered).toBe(true)
+    expect(inspect($('input')).labelCovered).toBe(false)
   })
 
   it('is still covered by the label of another field', () => {
     html(`<div><input id="a"><input id="b"><label for="b">B</label></div>`)
     box('div', [0, 0, 300, 40]); box('#a', [0, 0, 300, 40]); box('label', [8, 10, 100, 20])
     hitAt = () => $('label')
-    expect(inspect($('#a')).covered).toBe(true)
+    expect(inspect($('#a')).labelCovered).toBe(false)
+  })
+
+  it('is still covered by a label that reaches outside the field', () => {
+    html(`<div><input id="em" type="email"><label for="em">Email</label></div>`)
+    box('div', [0, 0, 300, 40]); box('input', [0, 0, 300, 40]); box('label', [0, 0, 300, 400])
+    hitAt = () => $('label')
+    expect(inspect($('input')).labelCovered).toBe(false)
   })
 
   it('is still covered by a label in a page-sized wrapper', () => {
     html(`<section><input name="account"><label class="big">Sign in</label></section>`)
     box('section', [0, 0, 1280, 800]); box('input', [10, 10, 320, 56]); box('label', [0, 0, 1280, 800])
     hitAt = () => $('label')
-    expect(inspect($('input')).covered).toBe(true)
+    expect(inspect($('input')).labelCovered).toBe(false)
   })
 })

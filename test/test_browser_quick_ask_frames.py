@@ -163,7 +163,11 @@ async def test_fill_lands_in_the_frame_through_its_own_session_and_leaks_nowhere
         ("owner_tiny", "hidden"),
         ("owner_transparent", "transparent"),
         ("owner_covered", "covered"),
+        ("owner_decoy_no_pointer_events", "covered"),
+        ("owner_blend_mode", "transparent"),
+        ("owner_filter_opacity", "transparent"),
         ("owner_scaled", "frame_transformed"),
+        ("owner_scaled_y", "frame_transformed"),
         ("owner_nested", "nested_frame"),
         ("frame_blank", "not_web_page"),
         ("not_attached", "ref_stale"),
@@ -184,10 +188,20 @@ async def test_an_unfit_frame_is_refused_at_ask_time(change: str, code: str) -> 
         owner["op"] = 0.2
     elif change == "owner_covered":
         owner["hit"] = False
+    elif change == "owner_decoy_no_pointer_events":
+        owner["decoy"] = True  # elementFromPoint still sees the frame
+    elif change == "owner_blend_mode":
+        owner["blend"] = True
+    elif change == "owner_filter_opacity":
+        owner["op"] = 0.3  # opacity(0.3) in a filter folds into the product
     elif change == "owner_scaled":
         # Drawn at half size: a frame pixel is not a page pixel.
         owner["content"] = [100, 200, 200, 150]
         page.frames["F2"]["vw"] = 400
+    elif change == "owner_scaled_y":
+        # scaleY only: axis-aligned and as wide as its viewport, but half as tall.
+        owner["content"] = [100, 200, 400, 150]
+        page.frames["F2"]["vh"] = 300
     elif change == "owner_nested":
         owner["sameDoc"] = False
     elif change == "frame_blank":
@@ -366,6 +380,32 @@ def test_content_origin_refuses_a_frame_it_cannot_place(quad: Any, width: Any, a
     assert fr.content_origin(quad, width) == at
 
 
+@pytest.mark.parametrize(
+    "role, problem",
+    [("password", ""), ("username", ""), ("otp", ""), ("action", "covered"), ("widget", "covered")],
+)
+def test_only_a_filled_field_may_sit_under_its_own_label(role: str, problem: str) -> None:
+    """The gateway writes into a filled field; it CLICKS a confirm button or a
+    widget, and a label over those would take the click."""
+    base = {"type": "password" if role == "password" else "text"}
+    if role == "action":
+        base = {"tag": "button"}
+    if role == "widget":
+        base = {"tag": "iframe"}
+    info = {
+        **base,
+        "connected": True,
+        "sameDoc": True,
+        "visible": True,
+        "covered": True,
+        "labelCovered": True,
+        "rect": [0, 0, 100, 30],
+        "tag": base.get("tag", "input"),
+    }
+    assert qa.target_problem(role, info) == problem
+    assert qa.target_problem(role, {**info, "labelCovered": False}) == "covered"
+
+
 def test_frame_refs_split() -> None:
     assert fr.split_frame_ref("f2e14") == (2, "e14")
     assert fr.split_frame_ref("e14") is None and fr.split_frame_ref("f0e1") is None
@@ -517,3 +557,87 @@ async def test_the_snapshot_reads_cross_origin_frames_into_the_outline(tmp_path:
 def test_the_tool_tells_the_agent_about_frame_refs_and_the_no_target_sign_in() -> None:
     desc = tool.schemas()[0]["description"]
     assert "f1e3" in desc and "NO targets" in desc
+
+
+class _FocusRelay:
+    """The top session and two child frames; the browser says F2 holds focus."""
+
+    def __init__(self, focused_frame: str) -> None:
+        self.focused_frame = focused_frame
+
+    async def send(self, method: str, params: dict[str, Any], sid: str) -> dict[str, Any]:
+        if method == "Page.getFrameTree":
+            return {"frameTree": {"frame": {"id": "F1"}}}
+        if method == "Page.createIsolatedWorld":
+            return {"executionContextId": 3}
+        if method == "Runtime.evaluate" and sid == "TOP":
+            return {"result": {"objectId": "o1"}}
+        if method == "DOM.describeNode":
+            return {"node": {"backendNodeId": 5, "frameId": self.focused_frame}}
+        if method == "Runtime.evaluate":
+            # Each child's own script: the AD frame lies that it holds a plain field.
+            if sid == "AD":
+                value = {"focused": True, "hasFocus": True, "password": False, "asked": False}
+            else:
+                value = {"focused": True, "hasFocus": True, "password": False, "asked": True}
+            return {"result": {"value": value}}
+        return {}
+
+
+async def test_the_focused_frame_is_named_by_the_browser_not_by_a_frame_that_lies() -> None:
+    reg = fr.FrameRegistry()
+    reg.parent = "TOP"
+    for fid, sid in (("FAD", "AD"), ("F2", "LOGIN")):
+        reg.handle(
+            {
+                "method": "Target.attachedToTarget",
+                "sessionId": "TOP",
+                "params": {"sessionId": sid, "targetInfo": {"targetId": fid, "type": "iframe"}},
+            }
+        )
+    ops_ = fr.FrameOps(_FocusRelay("F2"), "TOP", reg, "walker")
+    assert (await ops_.focused() or {}).get("asked") is True
+    unknown = fr.FrameOps(_FocusRelay("F9"), "TOP", reg, "walker")
+    assert await unknown.focused() is None
+
+
+async def test_a_frame_outline_is_clamped_and_its_url_loses_query_and_fragment(
+    tmp_path: Path,
+) -> None:
+    class Hostile(FakeFrames):
+        async def outline(self, frame_id: str, budget: int) -> Any:
+            return (
+                1,
+                IDMSA + "?token=SECRET#frag",
+                [
+                    {"depth": 10**9, "role": "textbox", "name": "x"},
+                    {"depth": "x", "role": "button", "name": "y"},
+                ],
+            )
+
+    nodes = [{"depth": [1], "role": "iframe", "name": "f", "slot": 0}]
+    page = {"snapshot": {"url": TOP_URL, "title": "t", "nodes": nodes}}
+    out = await ops.run_op("snapshot", {}, _ctx(Hostile(), page, [], tmp_path))
+    assert "SECRET" not in out["snapshot"] and "frag" not in out["snapshot"]
+    assert max(len(line) for line in out["snapshot"].splitlines()) < 300
+
+
+async def test_the_relay_swallows_late_detaches_of_a_dropped_parents_children() -> None:
+    relay = CdpRelay()
+
+    async def on_event(_msg: dict[str, Any]) -> None:
+        return None
+
+    relay._own_sessions["P"] = on_event
+    attach = {
+        "method": "Target.attachedToTarget",
+        "sessionId": "P",
+        "params": {"sessionId": "C", "targetInfo": {"targetId": "F2", "type": "iframe"}},
+    }
+    await relay._dispatch_upstream(json.dumps(attach))
+    relay._own_sessions.pop("P")
+    relay._drop_children("P")
+    await relay._dispatch_upstream(
+        json.dumps({"method": "Target.detachedFromTarget", "params": {"sessionId": "C"}})
+    )
+    assert relay.forwarded_down == 0 and "C" not in relay._closing

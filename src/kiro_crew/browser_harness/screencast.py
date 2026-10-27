@@ -621,6 +621,11 @@ _MASK_JS = (
     "walk(document,0,0,0);return {boxes:r,frames:f,partial:partial,sx:scrollX,sy:scrollY};})()"
 )
 
+
+def _finite(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) < 1e9
+
+
 #: Most boxes one query may report; more than this and the mask is unknown.
 MASK_BOX_LIMIT = 32
 #: How far, in CSS pixels, the page's scroll at the box query may sit from the
@@ -1227,8 +1232,15 @@ class LiveStream:
             if at is None:
                 continue
             for b in boxes:
-                if isinstance(b, list) and len(b) == 4:
-                    out.append([float(b[0]) + at[0], float(b[1]) + at[1], b[2], b[3]])
+                # The frame's own script answered this: numbers only, or the whole
+                # frame is masked instead.
+                nums = b if isinstance(b, list) and len(b) == 4 else None
+                if nums is None or not all(_finite(v) for v in nums):
+                    out.append([at[0], at[1], 100000.0, 100000.0])
+                    break
+                out.append(
+                    [float(nums[0]) + at[0], float(nums[1]) + at[1], float(nums[2]), float(nums[3])]
+                )
         return out
 
     # ── control ────────────────────────────────────────────────────────────

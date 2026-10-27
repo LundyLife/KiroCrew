@@ -341,11 +341,22 @@ _INSPECT_JS = """function () {
   var r = el.getBoundingClientRect();
   var cs = getComputedStyle(el);
   var op = parseFloat(cs.opacity || '1');
+  // Other ways to make a frame see-through: an opacity() filter or a blend mode
+  // up the chain, a mask or clip-path on the element itself.
+  var fop = function (s) {
+    var m = /opacity\\(\\s*([0-9.]+)(%?)\\s*\\)/.exec(s.filter || '');
+    return m ? parseFloat(m[1]) / (m[2] ? 100 : 1) : 1;
+  };
+  op *= fop(cs);
+  var blend = cs.mixBlendMode && cs.mixBlendMode !== 'normal';
+  var masked = (cs.clipPath && cs.clipPath !== 'none')
+    || ((cs.maskImage || cs.webkitMaskImage || 'none') !== 'none');
   var visible = r.width >= 2 && r.height >= 2 && cs.display !== 'none'
     && cs.visibility !== 'hidden' && op > 0.05;
   for (var p = el.parentElement; visible && p; p = p.parentElement) {
     var ps = getComputedStyle(p);
-    op *= parseFloat(ps.opacity || '1');
+    op *= parseFloat(ps.opacity || '1') * fop(ps);
+    if (ps.mixBlendMode && ps.mixBlendMode !== 'normal') blend = true;
     if (ps.display === 'none' || ps.visibility === 'hidden'
         || parseFloat(ps.opacity || '1') <= 0.05) visible = false;
   }
@@ -354,15 +365,18 @@ _INSPECT_JS = """function () {
   var hitRoot = root && root.elementFromPoint ? root : d;
   var hit = inView ? hitRoot.elementFromPoint(cx, cy) : null;
   var tag = (el.tagName || '').toLowerCase();
-  // The field's own floating label may sit over its centre (Xiaomi). That is not
-  // an overlay: clicking it focuses this field. Allowed: one of el.labels, or a
-  // <label> holding no control, inside the field's own small wrapper that holds
-  // no other control. Anything else at the centre (a button, a container, another
-  // control, a label of another field) still reads as covered.
+  // The field's own floating label may sit over its centre (Xiaomi). For a field
+  // the gateway FILLS (it writes into the node, it never clicks there) that is not
+  // an overlay. Allowed: a control-free <label> that lies inside the field's own
+  // box, and is one of el.labels or sits in the field's small wrapper holding no
+  // other control. Reported apart from `covered` (`labelCovered`): a clicked
+  // target (confirm, human_check) never gets this exemption.
   var ownLabel = function (h) {
     var lab = h && h.closest ? h.closest('label') : null;
     if (!lab || lab.contains(el)) return false;
     if (lab.querySelector('input,select,textarea,button,a[href],iframe')) return false;
+    var lr = lab.getBoundingClientRect();
+    if (lr.left < r.left - 8 || lr.top < r.top - 8 || lr.right > r.right + 8 || lr.bottom > r.bottom + 8) return false;
     if (el.labels) for (var i = 0; i < el.labels.length; i++) if (el.labels[i] === lab) return true;
     if (lab.htmlFor) {
       // A for= naming ANOTHER element is that element's label. One naming nothing
@@ -391,9 +405,12 @@ _INSPECT_JS = """function () {
     disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
     readOnly: el.readOnly === true,
     visible: visible,
-    covered: !(hit && (hit === el || el.contains(hit) || ownLabel(hit))),
+    covered: !(hit && (hit === el || el.contains(hit))),
+    labelCovered: !!(hit && hit !== el && !el.contains(hit) && ownLabel(hit)),
     rect: [r.left, r.top, r.width, r.height],
     op: op,
+    blend: !!blend,
+    masked: !!masked,
     vw: innerWidth, vh: innerHeight,
     text: text.replace(/\\s+/g, ' ').trim().slice(0, 120)
   };
@@ -542,7 +559,9 @@ class PageProbe:
             raise AskError("frame_unverified")
         return node
 
-    async def content_origin(self, node: int, frame_width: float) -> tuple[float, float]:
+    async def content_origin(
+        self, node: int, frame_width: float, frame_height: float
+    ) -> tuple[float, float]:
         """Where the frame's viewport starts in the page, measured by the browser.
 
         Refused (``frame_transformed``) when the frame is rotated or scaled: its
@@ -551,10 +570,19 @@ class PageProbe:
         from kiro_crew.browser_harness.frames import content_origin
 
         model = (await self._send("DOM.getBoxModel", {"backendNodeId": node})).get("model") or {}
-        at = content_origin(model.get("content"), frame_width)
+        at = content_origin(model.get("content"), frame_width, frame_height)
         if at is None:
             raise AskError("frame_transformed")
         return at
+
+    async def node_at(self, x: float, y: float) -> int:
+        """The ``backendNodeId`` drawn topmost at (x, y), ``pointer-events: none`` included."""
+        found = await self._send(
+            "DOM.getNodeForLocation",
+            {"x": int(x), "y": int(y), "ignorePointerEventsNone": True},
+        )
+        node = found.get("backendNodeId")
+        return node if isinstance(node, int) else 0
 
     async def evaluate(self, ctx: int, expression: str) -> Any:
         out = await self._send(
@@ -643,7 +671,7 @@ def target_problem(role: str, info: dict[str, Any]) -> str:
         return "cross_frame"
     if not info.get("visible"):
         return "hidden"
-    if info.get("covered"):
+    if info.get("covered") and not (role in _FILLED_ROLES and info.get("labelCovered")):
         return "covered"
     tag, typ = info.get("tag"), info.get("type")
     if role == "password":
@@ -680,6 +708,9 @@ def target_problem(role: str, info: dict[str, Any]) -> str:
 
 
 _INPUT_KIND = {"username": "text", "password": "password", "otp": "otp"}
+#: Targets the gateway writes into (never clicks): their own floating label may
+#: lie over them (``labelCovered``).
+_FILLED_ROLES = frozenset({"username", "password", "text", "otp"})
 
 
 def owner_problem(info: dict[str, Any]) -> str:
@@ -702,7 +733,7 @@ def owner_problem(info: dict[str, Any]) -> str:
         opacity = float(info.get("op", 1.0))
     except (TypeError, ValueError):
         opacity = 0.0
-    if opacity < FRAME_OPACITY_MIN:
+    if opacity < FRAME_OPACITY_MIN or info.get("blend") or info.get("masked"):
         return "transparent"
     return ""
 
@@ -742,6 +773,7 @@ async def _check_frame(
     owner: int,
     rects: list[tuple[float, float, float, float]],
     frame_width: float,
+    frame_height: float,
 ) -> tuple[tuple[float, float], float, float]:
     """The frame's offset in the page and the page's viewport, once the frame passes.
 
@@ -755,10 +787,14 @@ async def _check_frame(
     problem = owner_problem(info)
     if problem:
         raise AskError(problem)
-    at = await top.content_origin(owner, frame_width)
+    at = await top.content_origin(owner, frame_width, frame_height)
     for x, y, w, h in rects:
         px, py = round(at[0] + x + w / 2, 2), round(at[1] + y + h / 2, 2)
         if await top.call(owner, top_ctx, _HIT_JS, px, py) is not True:
+            raise AskError("covered")
+        # elementFromPoint skips a decoy with pointer-events: none laid over the
+        # frame; the browser's own hit test, told not to, does not.
+        if await top.node_at(px, py) != owner:
             raise AskError("covered")
     return at, float(info.get("vw") or 0), float(info.get("vh") or 0)
 
@@ -819,7 +855,7 @@ async def bind_ask(probe: PageProbe, spec: AskSpec, scale: float, frames: Any = 
     offset = (0.0, 0.0)
     if frame_id != top_id:
         owner = await top.frame_owner(frame_id)
-        offset, vw, vh = await _check_frame(top, top_ctx, owner, [b.rect for b in bindings], vw)
+        offset, vw, vh = await _check_frame(top, top_ctx, owner, [b.rect for b in bindings], vw, vh)
     return QuickAsk(
         spec=spec,
         origin=origin,
@@ -913,7 +949,10 @@ async def _recheck(top: PageProbe, ask: QuickAsk) -> tuple[PageProbe, int, list[
         if ask.owner:
             rects = [tuple(float(v) for v in i["rect"]) for i in infos]
             width = float(infos[0].get("vw") or 0) if infos else 0.0
-            ask.offset, _vw, _vh = await _check_frame(top, top_ctx, ask.owner, rects, width)  # type: ignore[arg-type]
+            height = float(infos[0].get("vh") or 0) if infos else 0.0
+            ask.offset, _vw, _vh = await _check_frame(  # type: ignore[arg-type]
+                top, top_ctx, ask.owner, rects, width, height
+            )
     except AskError as exc:
         raise AskError(ORIGIN_CHANGED) from exc.__cause__
     return fprobe, ctx, infos

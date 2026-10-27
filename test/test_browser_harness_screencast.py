@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from browser_live_helpers import (
@@ -684,15 +685,19 @@ async def test_password_boxes_inside_a_cross_origin_frame_are_masked_on_the_live
     is asked, and its boxes move by the owner's content box (measured by the browser)."""
     stream, relay, _clock, sink = make_stream()
     child = "CHILD"
-    top_answer = {"result": {"value": {"boxes": [], "frames": [[100, 200, 400, 300]], "partial": False}}}
-    child_answer = {"result": {"value": {"boxes": [[20, 80, 300, 30]], "frames": [], "partial": False}}}
+    top_answer = {
+        "result": {"value": {"boxes": [], "frames": [[100, 200, 400, 300]], "partial": False}}
+    }
+    child_answer = {
+        "result": {"value": {"boxes": [[20, 80, 300, 30]], "frames": [], "partial": False}}
+    }
     real_send = relay.send
 
     async def send(method: str, params: Any = None, session_id: Any = None) -> Any:
         if session_id == child and method == "Runtime.evaluate":
             relay.calls.append((method, dict(params or {}), session_id))
             expr = params["expression"]
-            return {"result": {"value": 400}} if expr == "innerWidth" else child_answer
+            return {"result": {"value": [400, 300]}} if "innerWidth" in expr else child_answer
         if method == "Runtime.evaluate":
             relay.calls.append((method, dict(params or {}), session_id))
             return top_answer
@@ -715,3 +720,41 @@ async def test_password_boxes_inside_a_cross_origin_frame_are_masked_on_the_live
     await relay.on_event(frame_event(make_jpeg(1280, 768)))
     header, _ = sink.frames[-1]
     assert header["mask"] == [[120, 280, 301, 31]]
+
+
+@pytest.mark.asyncio
+async def test_a_frame_that_answers_junk_boxes_is_masked_whole_and_the_frame_still_goes() -> None:
+    stream, relay, _clock, sink = make_stream()
+    child = "CHILD"
+    real_send = relay.send
+
+    async def send(method: str, params: Any = None, session_id: Any = None) -> Any:
+        if method == "Runtime.evaluate":
+            if session_id == child:
+                expr = params["expression"]
+                if "innerWidth" in expr:
+                    return {"result": {"value": [400, 300]}}
+                return {"result": {"value": {"boxes": [["1e3", "x", 2, 3]], "frames": []}}}
+            return {
+                "result": {
+                    "value": {"boxes": [], "frames": [[100, 200, 400, 300]], "partial": False}
+                }
+            }
+        return await real_send(method, params, session_id)
+
+    relay.send = send  # type: ignore[method-assign]
+    relay.answers["DOM.getFrameOwner"] = {"backendNodeId": 9}
+    relay.answers["DOM.getBoxModel"] = {
+        "model": {"content": [100, 200, 500, 200, 500, 500, 100, 500]}
+    }
+    await stream.start()
+    await stream._on_event(
+        {
+            "method": "Target.attachedToTarget",
+            "sessionId": SESSION,
+            "params": {"sessionId": child, "targetInfo": {"targetId": "F2", "type": "iframe"}},
+        }
+    )
+    await relay.on_event(frame_event(make_jpeg(1280, 768)))
+    header, _ = sink.frames[-1]
+    assert header["mask"] and header["mask"][0][:2] == [100, 200]

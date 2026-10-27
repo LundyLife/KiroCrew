@@ -220,6 +220,9 @@ class CdpRelay:
         self._own_sessions: dict[str, EventCallback] = {}
         #: Child sessions a relay-owned session auto-attached (out-of-process iframes).
         self._children: dict[str, set[str]] = {}
+        #: Child sessions dropped with their parent: Chrome's late detach events for
+        #: them are swallowed, never broadcast to a daemon client.
+        self._closing: set[str] = set()
         self._adopted: dict[str, str] = {}
         self._agent_targets: list[str] = []
         self._closed = False
@@ -378,6 +381,8 @@ class CdpRelay:
     def _drop_children(self, session_id: str) -> None:
         for child in self._children.pop(session_id, set()):
             self._own_sessions.pop(child, None)
+            if len(self._closing) < 4096:
+                self._closing.add(child)
             self._drop_children(child)
 
     def owns_session(self, session_id: str) -> bool:
@@ -519,6 +524,12 @@ class CdpRelay:
         if isinstance(mid, int):
             await self._route_reply(mid, msg)
             return
+        if self._closing:
+            params = msg.get("params") or {}
+            if sid in self._closing or params.get("sessionId") in self._closing:
+                if msg.get("method") == "Target.detachedFromTarget":
+                    self._closing.discard(params.get("sessionId") or sid)
+                return
         self._observe_event(msg)
         for ws in list(self._clients):
             try:

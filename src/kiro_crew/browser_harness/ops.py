@@ -263,8 +263,7 @@ def format_outline(nodes: list[dict[str, Any]]) -> str:
     for n in nodes:
         if not isinstance(n, dict):
             continue
-        depth = n.get("depth")
-        indent = "  " * max(0, int(depth) if isinstance(depth, (int, float)) else 0)
+        indent = "  " * _depth(n.get("depth"))
         role = n.get("role") or "generic"
         name = "" if n.get("name") is None else str(n.get("name"))
         line = f'{indent}- {role} "{name}"'
@@ -485,6 +484,16 @@ async def _back(ctx: OpContext, _args: dict[str, Any]) -> dict[str, Any]:
 NODE_CAP = 1500
 
 
+_DEPTH_MAX = 64
+
+
+def _depth(value: Any) -> int:
+    """A walker node's depth, from page script: a small whole number or 0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        return 0
+    return max(0, min(_DEPTH_MAX, int(value)))
+
+
 async def _with_frames(ctx: OpContext, nodes: list[Any]) -> list[Any]:
     """Fill each cross-origin frame's ``slot`` node with that frame's own outline.
 
@@ -511,11 +520,12 @@ async def _with_frames(ctx: OpContext, nodes: list[Any]) -> list[Any]:
             out.append(head)
             continue
         tag, url, inner = read
-        head["frame"] = f"f{tag} {url[:120]}"
+        # Origin and path only: a frame's query or fragment can carry a token.
+        head["frame"] = f"f{tag} {url.split('?', 1)[0].split('#', 1)[0][:120]}"
         out.append(head)
-        depth = int(n.get("depth") or 0) + 1
+        depth = _depth(n.get("depth")) + 1
         for m in inner:
-            out.append({**m, "depth": depth + int(m.get("depth") or 0)})
+            out.append({**m, "depth": min(_DEPTH_MAX, depth + _depth(m.get("depth")))})
         budget -= len(inner)
     return out
 

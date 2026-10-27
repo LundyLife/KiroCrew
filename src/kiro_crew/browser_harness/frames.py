@@ -146,10 +146,12 @@ class FrameOps:
                 "model"
             ) or {}
             q = model.get("content")
-            vw = await self._eval(sid, "innerWidth")
+            size = await self._eval(sid, "[innerWidth, innerHeight]")
         except Exception:  # noqa: BLE001 - the frame is gone or mid-navigation
             return None
-        return content_origin(q, vw)
+        if not isinstance(size, list) or len(size) != 2:
+            return None
+        return content_origin(q, size[0], size[1])
 
     async def call(self, tag: int, method: str, local_ref: str, *args: Any) -> Any:
         """Run one ref-taking walker method in the frame *tag*; ``None`` when unreadable.
@@ -229,17 +231,47 @@ class FrameOps:
         return tag, url, nodes
 
     async def focused(self) -> dict[str, Any] | None:
-        """The focused field inside whichever child frame holds focus, or ``None``."""
-        for _frame_id, sid in self.registry.frames():
-            try:
-                active = await self._walker(sid, "activeField")
-            except Exception:  # noqa: BLE001
+        """The focused field inside the child frame that holds focus, or ``None``.
+
+        WHICH frame holds focus is read from the browser, not from any frame's
+        script: the top document's ``activeElement`` in an isolated world (page
+        script cannot patch it there), then ``DOM.describeNode`` for its frame id.
+        Only that frame is asked what its field is; ``None`` when it is not one
+        we hold a session for.
+        """
+        try:
+            tree = await self._send("Page.getFrameTree", {}, self.top)
+            top_id = str(((tree.get("frameTree") or {}).get("frame") or {}).get("id") or "")
+            made = await self._send(
+                "Page.createIsolatedWorld",
+                {"frameId": top_id, "worldName": "kirocrew_frames", "grantUniveralAccess": False},
+                self.top,
+            )
+            found = await self._send(
+                "Runtime.evaluate",
+                {
+                    "expression": "document.activeElement",
+                    "contextId": made.get("executionContextId"),
+                },
+                self.top,
+            )
+            obj = (found.get("result") or {}).get("objectId")
+            if not obj:
                 return None
-            if isinstance(active, dict) and active.get("hasFocus") and active.get("focused"):
-                if active.get("frame"):
-                    return None  # deeper than we read
-                return active
-        return None
+            try:
+                desc = await self._send("DOM.describeNode", {"objectId": obj}, self.top)
+            finally:
+                await self._send("Runtime.releaseObject", {"objectId": obj}, self.top)
+            frame_id = str((desc.get("node") or {}).get("frameId") or "")
+            sid = self.registry.session_of(frame_id) if frame_id else ""
+            if not sid:
+                return None
+            active = await self._walker(sid, "activeField")
+        except Exception:  # noqa: BLE001 - unreadable: the caller fails closed
+            return None
+        if not isinstance(active, dict) or not active.get("focused") or active.get("frame"):
+            return None  # nothing focused there, or deeper than we read
+        return active
 
     async def count(self, method: str) -> int:
         """Sum of ``askedValues``/``passwordBoxes`` over the child frames; one that
@@ -254,8 +286,15 @@ class FrameOps:
         return total
 
 
-def content_origin(quad: Any, frame_width: Any) -> tuple[float, float] | None:
-    """The top-left of an axis-aligned, unscaled content quad, else ``None``."""
+def content_origin(
+    quad: Any, frame_width: Any, frame_height: Any = None
+) -> tuple[float, float] | None:
+    """The top-left of an axis-aligned, unscaled content quad, else ``None``.
+
+    Unscaled on both axes: a ``scaleY`` frame is still axis-aligned and as wide as
+    its viewport, but its points land elsewhere. *frame_height* ``None`` checks the
+    width only (a caller that has just one side).
+    """
     if not isinstance(quad, list) or len(quad) != 8:
         return None
     try:
@@ -268,6 +307,11 @@ def content_origin(quad: Any, frame_width: Any) -> tuple[float, float] | None:
         return None
     if abs((x2 - x1) - float(frame_width)) > SCALE_TOLERANCE_PX:
         return None  # scaled: a frame pixel is not a page pixel
+    if frame_height is not None:
+        if isinstance(frame_height, bool) or not isinstance(frame_height, (int, float)):
+            return None
+        if abs((y4 - y1) - float(frame_height)) > SCALE_TOLERANCE_PX:
+            return None
     return x1, y1
 
 
