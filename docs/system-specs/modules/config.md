@@ -4006,6 +4006,24 @@ same check the messaging namer and the session summary run against their own
 taught word) -- while a real title that merely opens with the word ("SKIP and
 KEEP handling", "KEEP-ALIVE header bug") survives.
 
+#### The tag also writes a crewmate's hidden turns
+
+A crewmate's first welcome and its goal check-ins are hidden gateway turns
+(`mate_welcome.dispatch_hidden_turn`) with no user text to follow, and the
+`[UI LANGUAGE]` block scopes itself to tool-call purpose text, so without a
+directive of their own they come back in English. Each prompt therefore ends on
+one language line (`mate_welcome.language_line`, pieces `hidden_turn.language_*`
+in `crewmate_prompts.json`), resolved by `mate_welcome.hidden_turn_language()`:
+the configured tag through `context.ui_language_tag()`, else -- for the welcome
+only -- the opening tab's `X-UI-Lang` header (`activeLocale()`, sent by
+`api.memberGreet`), validated by `normalize_ui_language_tag` and used for that
+request only, never persisted. `en` and an unusable tag add no line, so an
+English install's kickoff stays byte-identical. The welcome is told to write in
+the tag; a check-in runs in a thread the user has written in, so it is told to
+follow the user's language there, falling back to the configured tag when they
+have not written yet. A check-in has no tab behind it, so on a "follow the
+browser" install it carries only the follow-the-thread line.
+
 ### Response verbosity reaches every agent
 
 `dashboard.verbosity` describes how the PERSON wants replies to read, so it is

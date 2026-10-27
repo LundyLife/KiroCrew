@@ -117,6 +117,56 @@ _GOAL_KNOWN = _GOAL_DRAFT + crewmate_prompts.text("welcome.goal_known_tools")
 _GOAL_KNOWN_NO_TOOLS = _GOAL_DRAFT + crewmate_prompts.text("welcome.goal_known_no_tools")
 
 
+#: Appended to a first welcome when the user's language is known.
+_LANGUAGE_FIRST = crewmate_prompts.text("hidden_turn.language_first")
+#: Appended to a goal check-in: follow the thread, or the configured language.
+_LANGUAGE_THREAD = crewmate_prompts.text("hidden_turn.language_thread")
+_LANGUAGE_THREAD_OR_TAG = crewmate_prompts.text("hidden_turn.language_thread_or_tag")
+
+
+def hidden_turn_language(ui_lang: object = "") -> str:
+    """The language a hidden gateway turn writes in, as a BCP-47 tag, or ``""``.
+
+    A hidden turn has no user text to follow, and the ``[UI LANGUAGE]`` block
+    the session carries steers only tool-call purpose text (replies follow the
+    language the user writes in), so without a line of its own the reply falls
+    back to English. The configured ``dashboard.language`` wins; on an install
+    left on "follow the browser" the opening tab's ``X-UI-Lang`` (*ui_lang*,
+    the language the SPA rendered) is the only signal, and is used per request,
+    never persisted, as ``guide_observe`` does. Both pass the same validation
+    gate, so client text never reaches the prompt. ``en`` reads as ``""``: the
+    kickoff already writes English without a line.
+
+    Total and blocking (a config read): an unreadable config only means no line.
+    """
+    from kiro_crew.config.loader import KiroCrewConfig
+    from kiro_crew.context import normalize_ui_language_tag, ui_language_tag
+
+    try:
+        tag = ui_language_tag(KiroCrewConfig.load())
+    except Exception:
+        logger.debug("dashboard.language unreadable for a hidden turn", exc_info=True)
+        tag = ""
+    if not tag:
+        tag = normalize_ui_language_tag(ui_lang, source="X-UI-Lang")
+    return "" if tag == "en" else tag
+
+
+def language_line(language: str, *, in_thread: bool = False) -> str:
+    """The sentence a hidden turn's prompt ends with to set its reply language.
+
+    A first welcome (*in_thread* false) writes in *language*, or gets no line
+    when it is ``""``. A goal check-in (*in_thread*) runs in a thread the user
+    has written in, so it follows their language there, falling back to
+    *language* when they have not written yet.
+    """
+    if in_thread:
+        if language:
+            return _LANGUAGE_THREAD_OR_TAG.format(language=language)
+        return _LANGUAGE_THREAD
+    return _LANGUAGE_FIRST.format(language=language) if language else ""
+
+
 def _recorded_goal(slug: str, member: str) -> str:
     """*member*'s goals from its goal record, one per line, or ``""``.
 
@@ -249,9 +299,10 @@ def _has_content(slot: Any) -> bool:
     return bool(slot.messages) or bool(getattr(slot, "_queue", None))
 
 
-async def maybe_start_first_greeting(state: Any, slug: str) -> str:
+async def maybe_start_first_greeting(state: Any, slug: str, ui_lang: object = "") -> str:
     """Start the first welcome *slug*'s crewmate owes: Mate's, or a goal question.
 
+    *ui_lang* is the opening tab's ``X-UI-Lang`` (:func:`hidden_turn_language`).
     Returns one of the module's outcome constants. Every check that can refuse
     runs BEFORE the marker is claimed, and the emptiness/busy checks run again
     after the off-loop claim, since a send can land while the claim is written.
@@ -277,6 +328,7 @@ async def maybe_start_first_greeting(state: Any, slug: str) -> str:
         )
     else:
         kickoff = welcome_kickoff(entry, has_other_crewmates=others, has_mate_tools=has_tools)
+    kickoff += language_line(await asyncio.to_thread(hidden_turn_language, ui_lang))
     if not await asyncio.to_thread(claim_greeting_marker, slug, slot.key):
         return ALREADY_GREETED
     if slot.running or _has_content(slot) or state._slots.get(slot.key) is not slot:
