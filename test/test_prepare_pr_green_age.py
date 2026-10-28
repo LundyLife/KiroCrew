@@ -18,6 +18,7 @@ green.
 from __future__ import annotations
 
 import functools
+import json
 import subprocess
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -391,6 +392,109 @@ def test_the_skill_states_the_loops_own_bounds(mod) -> None:
     # Exit 2 satisfies no criterion and blocks none.
     assert "exit 2 satisfies this criterion no more than it blocks it" in skill
     assert "after **three consecutive** 2s report the reason and hand the PR over" in skill
+    # The cap has an exit code of its own, listed with the others.
+    assert "31 STALE, re-sync cap spent" in skill
+    assert "**31** → do not rebase" in skill
+
+
+# --- the re-sync cap ----------------------------------------------------------
+
+# SKILL.md's stated cap. A literal, so a test still asserts when the script has
+# no cap at all.
+_CAP = 3
+
+
+def _rebased(n: int) -> str:
+    return "Rebased: main moved in docs/x.md since this head went green (a{0} -> b{0}); CI re-running.".format(
+        n
+    )
+
+
+def _gh_stub(mod: ModuleType, monkeypatch, comments, *, comments_rc: int = 0, calls=None):
+    """Answer the two ``gh pr view`` calls; let git through to the real runner."""
+    real_run = mod.run
+
+    def fake_run(args):
+        if args[:3] == ["gh", "pr", "view"]:
+            if calls is not None:
+                calls.append(args)
+            if "comments" in args:
+                body = comments if isinstance(comments, str) else json.dumps(comments)
+                return comments_rc, body, ""
+            return 0, "src/kiro_crew/ledger/store.py\n", ""
+        return real_run(args)
+
+    monkeypatch.setattr(mod, "run", fake_run)
+
+
+def _stale_pr(pair: Pair) -> None:
+    pair.branch_changes({"src/kiro_crew/ledger/store.py": "VALUE = 2\n"})
+    pair.base_gains({"src/kiro_crew/ledger/store.py": "VALUE = 3\n"})
+
+
+def test_a_spent_resync_cap_is_its_own_exit_code(mod, monkeypatch, pair, capsys) -> None:
+    """Three Rebased comments already posted: the loop hands over, it does not rebase."""
+    _stale_pr(pair)
+    _gh_stub(mod, monkeypatch, [_rebased(i) for i in range(_CAP)] + ["LGTM"])
+
+    code = _run_main(mod, monkeypatch, pair, "--pr", "42")
+
+    assert code == 31
+    assert getattr(mod, "EXIT_RESYNC_CAP", None) == 31
+    assert getattr(mod, "RESYNC_CAP", None) == _CAP
+    assert "hand the PR to the user" in capsys.readouterr().err
+
+
+def test_resyncs_under_the_cap_still_answer_stale(mod, monkeypatch, pair) -> None:
+    _stale_pr(pair)
+    _gh_stub(mod, monkeypatch, [_rebased(i) for i in range(_CAP - 1)] + ["Rebased? no"])
+
+    assert _run_main(mod, monkeypatch, pair, "--pr", "42") == mod.EXIT_STALE
+
+
+@pytest.mark.parametrize(
+    ("payload", "rc"),
+    [("[]", 1), ("not json", 0), ('{"a": 1}', 0)],
+    ids=["gh-fails", "garbage", "not-a-list"],
+)
+def test_an_unreadable_count_keeps_todays_answer(mod, monkeypatch, pair, payload, rc) -> None:
+    """Only a PROVEN spent cap changes the code; unknown stays exit 30."""
+    _stale_pr(pair)
+    _gh_stub(mod, monkeypatch, payload, comments_rc=rc)
+
+    assert _run_main(mod, monkeypatch, pair, "--pr", "42") == mod.EXIT_STALE
+
+
+def test_a_fresh_answer_never_reads_the_comments(mod, monkeypatch, pair) -> None:
+    """The count is lazy: FRESH costs no extra API call."""
+    pair.branch_changes({"src/kiro_crew/ledger/store.py": "VALUE = 2\n"})
+    pair.base_gains({"docs/readme.md": "hello again\n"})
+    calls: list = []
+    _gh_stub(mod, monkeypatch, [_rebased(i) for i in range(5)], calls=calls)
+
+    assert _run_main(mod, monkeypatch, pair, "--pr", "42") == mod.EXIT_FRESH
+    assert calls and not any("comments" in c for c in calls)
+
+
+def test_summarize_does_not_count_resyncs(mod, monkeypatch) -> None:
+    """pr_status.py embeds summarize(); the cap belongs to the CLI only."""
+    monkeypatch.setattr(
+        mod, "count_resyncs", lambda *a, **k: pytest.fail("summarize counted"), raising=False
+    )
+    monkeypatch.setattr(mod, "run", lambda args: (1, "", ""))
+    assert mod.summarize(pr="42")["ok"] is False
+
+
+def test_the_armed_loop_carries_both_guards() -> None:
+    """The message is the only text a woken cycle receives, so the guards live there."""
+    text = " ".join(
+        (SCRIPT.parent.parent / "references" / "monitor-loop.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    message = text.split('message="', 1)[1].split("interval_secs=", 1)[0].replace('" "', "")
+    assert "unless runs are in flight on this head" in message
+    assert "green_age 31: re-sync cap spent, do not rebase" in message
 
 
 def test_a_flat_directory_is_not_a_module(mod, monkeypatch, pair, capsys) -> None:

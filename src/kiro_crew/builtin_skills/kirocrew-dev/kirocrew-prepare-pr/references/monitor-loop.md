@@ -7,8 +7,10 @@ keeps the fixed arguments and the rules for them; this file holds the call itsel
 monitor_start(
   message="Check https://github.com/owner/repo/pull/123 with green_age.py "
           "--pr 123 then pr_status.py --reviewers <profile reviewer names>. "
-          "green_age 30: re-sync, run the related tests, push, post one "
-          "Rebased comment. pr_status 10: stay silent. Exit 20: read "
+          "green_age 30: unless runs are in flight on this head, re-sync, "
+          "run the related tests, push, post one Rebased comment. "
+          "green_age 31: re-sync cap spent, do not rebase; hand the PR to "
+          "the user and call autonudge_stop. pr_status 10: stay silent. Exit 20: read "
           "pr_findings.py and triage; a red main follows When main is red; "
           "Kiro Crew AI repairs MUST follow kirocrew-prepare-pr Review repair routing "
           "with model-pinned subagents, then parent verification and Phases "

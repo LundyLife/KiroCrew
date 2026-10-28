@@ -40,13 +40,21 @@ first. Each class exists because it has been observed to break a green head:
 during the review wait, and costs anything only on a PR whose files actually
 collide. It adds no required check and slows no merge.
 
+With ``--pr``, a STALE answer also counts the PR's ``Rebased: <base> moved in``
+comments, the one each re-sync posts. Once ``RESYNC_CAP`` of them exist the
+re-sync budget is spent and the answer is exit 31: hand the PR to the user
+instead of rebasing again. The count is read only on the STALE path, so a FRESH
+answer costs no extra API call, and a count that cannot be read keeps exit 30.
+
 Usage:  python3 green_age.py [--base BRANCH] [--pr N]
-Exit:   0 FRESH (no overlap) | 30 STALE (rebase and re-run) | 2 environment error
+Exit:   0 FRESH (no overlap) | 30 STALE (rebase and re-run) |
+        31 STALE, re-sync cap spent (hand the PR to the user) | 2 environment error
 """
 
 import argparse
 import ast
 import functools
+import json
 import re
 import shutil
 import subprocess
@@ -57,7 +65,16 @@ import warnings
 # from the values here.
 EXIT_FRESH = 0
 EXIT_STALE = 30
+EXIT_RESYNC_CAP = 31
 EXIT_ENV = 2
+
+# SKILL.md Phase 3 step 5: after this many green-age re-syncs on one PR, the
+# next STALE answer hands the PR to the user instead of rebasing it again.
+RESYNC_CAP = 3
+
+# The comment each re-sync posts, as SKILL.md spells it. Counting these is the
+# loop's only memory across wakes: every monitor cycle is a fresh turn.
+_REBASED_COMMENT_RE = re.compile(r"^Rebased: \S+ moved in ")
 
 # Directory components that name a layout, not a module. A parent whose last
 # component is one of these is not evidence that two files belong together --
@@ -489,6 +506,30 @@ def _pr_files(pr, runner=None):
     return _lines(out)
 
 
+def count_resyncs(pr, runner=None):
+    """How many ``Rebased: <base> moved in`` comments PR ``pr`` carries, or None.
+
+    None means the count could not be read. The caller treats that as "cap not
+    proven spent", so an unreadable thread never changes the exit-30 answer.
+    """
+    if not re.match(r"^[0-9]+$", str(pr)):
+        return None
+    rc, out, _ = (runner or run)(
+        ["gh", "pr", "view", str(pr), "--json", "comments", "-q", "[.comments[].body]"]
+    )
+    if rc != 0:
+        return None
+    try:
+        bodies = json.loads(out or "[]")
+    except ValueError:
+        return None
+    if not isinstance(bodies, list):
+        return None
+    return sum(
+        1 for body in bodies if isinstance(body, str) and _REBASED_COMMENT_RE.match(body.lstrip())
+    )
+
+
 def summarize(base="main", pr="", head="HEAD", runner=None):
     """Measure this head's green against today's ``origin/<base>``.
 
@@ -611,7 +652,16 @@ def main(argv=None):
     else:
         print(line)
         code = EXIT_STALE if summary["stale"] else EXIT_FRESH
-        if summary["stale"]:
+        resyncs = count_resyncs(args.pr) if summary["stale"] and args.pr else None
+        if resyncs is not None and resyncs >= RESYNC_CAP:
+            code = EXIT_RESYNC_CAP
+            err(
+                "RESYNC CAP: PR #{} already carries {} 'Rebased:' re-sync comment(s), "
+                "the cap is {}. Do not rebase again: hand the PR to the user.".format(
+                    args.pr, resyncs, RESYNC_CAP
+                )
+            )
+        elif summary["stale"]:
             err(
                 "STALE: origin/{} gained {} commit(s) touching {} file(s) this PR also "
                 "touches, so this head's green was not measured against them. Rebase "
